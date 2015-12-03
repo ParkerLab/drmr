@@ -9,8 +9,11 @@
 
 from __future__ import print_function
 
+import collections
 import copy
+import logging
 import os
+import re
 import subprocess
 import uuid
 import textwrap
@@ -25,49 +28,58 @@ class DistributedResourceManager(object):
     default_job_template = ''
 
     def __init__(self):
-        self.default_directives = {
+        self.default_job_data = {
+            'dependencies': {},
             'environment_setup': [],
         }
 
-    def make_control_directory(self, directives):
-        control_path = absjoin(directives.get('working_directory', ''), '.drmr')
-        makedirs(control_path)
-        directives['control_directory'] = control_path
-        return control_path
+    def make_control_directory(self, job_data):
+        self.set_control_directory(job_data)
+        makedirs(job_data['control_directory'])
 
-    def make_job_filename(self, directives):
-        control_directory = self.make_control_directory(directives)
-        return absjoin(control_directory, directives['name'] + '.' + self.name)
+    def make_job_filename(self, job_data):
+        self.make_control_directory(job_data)
+        return absjoin(job_data['control_directory'], job_data['job_name'] + '.' + self.name)
 
-    def make_job_template(self, directives):
+    def make_job_template(self, job_data):
         """Format a job template, suitable for submission to the DRM."""
-        job_data = {}
-        job_data.update(copy.deepcopy(self.default_directives))
-        job_data.update(directives)
+        template_data = self.make_job_template_data(job_data)
+        template_environment = jinja2.Environment()
+        return template_environment.from_string(self.default_job_template).render(**template_data)
 
-        self.set_dependencies(job_data)
-        self.set_mail_events(job_data)
-        self.set_name(job_data)
-        self.set_working_directory(job_data)
+    def make_job_template_data(self, job_data):
+        template_data = {}
+        template_data.update(copy.deepcopy(self.default_job_data))
+        template_data.update(job_data)
+
+        self.set_control_directory(template_data)
+        self.set_working_directory(template_data)
+        self.set_mail_events(template_data)
+        self.set_job_name(template_data)
+        self.set_dependencies(template_data)
 
         python_virtualenv = os.getenv('VIRTUAL_ENV')
         if python_virtualenv:
-            job_data['environment_setup'].append('. {}/bin/activate'.format(python_virtualenv))
+            template_data['environment_setup'].append('. {}/bin/activate'.format(python_virtualenv))
 
-        template_environment = jinja2.Environment()
-        return template_environment.from_string(self.default_job_template).render(**job_data)
+        return template_data
+
+    def set_control_directory(self, job_data):
+        control_path = absjoin(job_data.get('working_directory', ''), '.drmr')
+        job_data['control_directory'] = control_path
+        return control_path
 
     def set_dependencies(self, job_data):
-        """Convert the list of dependencies to the string format required by the DRM."""
+        """Convert the map of dependency states to job IDs to the string format required by the DRM."""
         raise NotImplementedError
+
+    def set_job_name(self, job_data):
+        if 'job_name' not in job_data:
+            job_data['job_name'] = uuid.uuid4()
 
     def set_mail_events(self, job_data):
         """Convert the list of mail events to the string format required by the DRM."""
         raise NotImplementedError
-
-    def set_name(self, job_data):
-        if 'name' not in job_data:
-            job_data['name'] = uuid.uuid4()
 
     def set_working_directory(self, job_data):
         if 'working_directory' not in job_data:
@@ -79,10 +91,57 @@ class DistributedResourceManager(object):
         """
         raise NotImplementedError
 
-    def write_job_file(self, directives):
-        job_filename = self.make_job_filename(directives)
+    def submit_completion_jobs(self, job_data, job_list, mail_at_finish=False):
+        """Submit two jobs: one to record success, and one just to record completion."""
+        if not job_list:
+            raise ValueError('You did not supply a list of job IDs to wait for.')
+
+        common_data = copy.deepcopy(job_data)
+        common_data.update({
+            'walltime': '00:15:00',  # not really, but ARC suggest that it be the minimum for any job
+        })
+        common_data = self.make_job_template_data(common_data)
+
+        #
+        # The happy path: all jobs completed; we're done, or on to the
+        # next phase. This success job ID is what dependent tasks should
+        # watch.
+        #
+        success_commands = ['touch {control_directory}/{job_name}.success'.format(**common_data)]
+        success_data = copy.deepcopy(common_data)
+        success_data.update({
+            'job_name': success_data['job_name'] + '.success',
+            'dependencies': {'ok': job_list},
+            'command': '\n'.join(success_commands),
+        })
+
+        success_job_filename = self.write_job_file(success_data)
+        success_job_id = self.submit(success_job_filename)
+
+        #
+        # Whatever happened, let's record that the job is done.
+        #
+        finish_commands = ['touch {control_directory}/{job_name}.finished'.format(**common_data)]
+
+        finish_data = copy.deepcopy(common_data)
+        finish_data.update({
+            'job_name': finish_data['job_name'] + '.finish',
+            'dependencies': {'any': job_list},
+            'command': '\n'.join(finish_commands)
+        })
+
+        if mail_at_finish:
+            finish_data['mail_events'] = ['END', 'FAIL']
+
+        finish_job_filename = self.write_job_file(finish_data)
+        self.submit(finish_job_filename)
+
+        return success_job_id
+
+    def write_job_file(self, job_data):
+        job_filename = self.make_job_filename(job_data)
         with open(job_filename, 'w') as job_file:
-            job_file.write(self.make_job_template(directives))
+            job_file.write(self.make_job_template(job_data))
         return job_filename
 
 
@@ -100,39 +159,51 @@ class PBS(DistributedResourceManager):
         #PBS -o {{control_directory}}
         {%- if account %}
         #PBS -A {{account}}
-        {% endif -%}
+        {%- endif %}
         {%- if email %}
         #PBS -M {{email}}
-        {% endif -%}
+        {%- endif %}
         {%- if mail_events %}
         #PBS -m {{mail_events}}
-        {% endif -%}
-        #PBS -N {{name}}
-        {%- if dependencies %}
-        #PBS -W afterok:{{dependencies}}
-        {% endif -%}
+        {%- endif %}
+        #PBS -N {{job_name}}
+        {%- if dependency_list %}
+        #PBS -W depend={{dependency_list}}
+        {%- endif %}
         {%- if working_directory %}
         #PBS -d {{working_directory}}
-        {% endif -%}
+        {%- endif %}
         #PBS -l nodes={{nodes|default(1)}}
         #PBS -l procs={{processors|default(1)}}
         #PBS -l pmem={{processor_memory|default("4000m")}}
         {%- if time_limit %}
         #PBS -l walltime={{time_limit}}
-        {% endif -%}
+        {%- endif %}
         {%- if destination %}
         #PBS -q {{destination}}
-        {% endif -%}
+        {%- endif %}
+        {%- if raw_preamble %}
         {{raw_preamble}}
+        {%- endif %}
 
         ####  End PBS preamble
 
+        {% if notes -%}
+        ####  Notes
         {{notes}}
+        {%- endif %}
 
-        {%- for line in environment_setup %}
+        {% if environment_setup -%}
+        ####  Environment setup
+        {% for line in environment_setup %}
         {{line}}
-        {% endfor -%}
+        {%- endfor %}
+        {%- endif %}
+
+        ####  Commands
+
         {{command}}
+
 
         """
     ).lstrip()
@@ -143,9 +214,25 @@ class PBS(DistributedResourceManager):
         'FAIL': 'a',
     }
 
+    array_job_id_re = re.compile('^\S+\[.*\]')
+
     def set_dependencies(self, job_data):
-        if job_data.get('dependencies'):
-            job_data['dependencies'] = ':'.join(job_data['dependencies'])
+        dependencies = job_data.get('dependencies')
+        if dependencies:
+            dependency_list = []
+            if not isinstance(dependencies, collections.Mapping):
+                raise ValueError("Job data does not contain a map under the 'dependencies' key.")
+            for state, job_ids in dependencies.items():
+                if state not in drmr.JOB_DEPENDENCY_STATES:
+                    raise ValueError('Unsupported dependency state: %s' % state)
+
+                job_ids = [str(job_id) for job_id in job_ids]
+                array_jobs = ':'.join([job_id for job_id in job_ids if self.array_job_id_re.search(job_id)])
+                regular_jobs = ':'.join([job_id for job_id in job_ids if not self.array_job_id_re.search(job_id)])
+                array_dependency_list = array_jobs and ('after%sarray:%s' % (state, array_jobs)) or ''
+                regular_dependency_list = regular_jobs and ('after%s:%s' % (state, regular_jobs)) or ''
+                dependency_list.append(','.join(l for l in [array_dependency_list, regular_dependency_list] if l))
+            job_data['dependency_list'] = ','.join(dependency_list)
 
     def set_mail_events(self, job_data):
         if job_data.get('mail_events'):
@@ -174,29 +261,54 @@ class Slurm(DistributedResourceManager):
         ####  Slurm preamble
 
         #SBATCH --export=ALL
-        #SBATCH --output "{{control_directory}}/{{name}}_%j.out"
-        {% if account %}#SBATCH --account={{account}}{% endif -%}
-        {% if email %}#SBATCH --mail-user={{email}}{% endif -%}
-        {% if mail_events %}#SBATCH --mail-type={{mail_events}}{% endif -%}
-        #SBATCH --job-name={{name}}
-        {% if dependencies %}#SBATCH --dependencies afterok:{{dependencies}}{% endif -%}
-        {% if working_directory %}#SBATCH --workdir={{working_directory}}{% endif -%}
+        #SBATCH --output "{{control_directory}}/{{job_name}}_%j.out"
+        {%- if account %}
+        #SBATCH --account={{account}}
+        {%- endif %}
+        {%- if email %}
+        #SBATCH --mail-user={{email}}
+        {%- endif %}
+        {%- if mail_events %}
+        #SBATCH --mail-type={{mail_events}}
+        {%- endif %}
+        #SBATCH --job-name={{job_name}}
+        {%- if dependency_list %}
+        #SBATCH --dependency={{dependency_list}}
+        {%- endif %}
+        {%- if working_directory %}
+        #SBATCH --workdir={{working_directory}}
+        {%- endif %}
         #SBATCH --nodes={{nodes|default(1)}}
         #SBATCH --ntasks={{processors|default(1)}}
         #SBATCH --mem-per-cpu={{processor_memory|default("4000m")}}
-        {% if time_limit %}#SBATCH --time={{time_limit}}{% endif -%}
-        {% if destination %}#SBATCH --partition={{destination}}{% endif -%}
+        {%- if time_limit %}
+        #SBATCH --time={{time_limit}}
+        {%- endif %}
+        {%- if destination %}
+        #SBATCH --partition={{destination}}
+        {%- endif %}
+        {%- if raw_preamble %}
         {{raw_preamble}}
+        {%- endif %}
 
         ####  End Slurm preamble
 
+        {% if notes -%}
+        ####  Notes
         {{notes}}
+        {%- endif %}
 
-        {%- for line in environment_setup %}
+        {% if environment_setup -%}
+        ####  Environment setup
+        {% for line in environment_setup %}
         {{line}}
-        {% endfor -%}
+        {%- endfor %}
+        {%- endif %}
+
+        ####  Commands
 
         {{command}}
+
 
         """
     ).lstrip()
@@ -208,8 +320,19 @@ class Slurm(DistributedResourceManager):
     }
 
     def set_dependencies(self, job_data):
-        if job_data.get('dependencies'):
-            job_data['dependencies'] = ':'.join(job_data['dependencies'])
+        logger = logging.getLogger()
+        dependencies = job_data.get('dependencies')
+        logger.debug('job {job_name} dependencies: {dependencies}'.format(**job_data))
+        if dependencies:
+            dependency_list = []
+            if not isinstance(dependencies, collections.Mapping):
+                raise ValueError("Job data does not contain a map under the 'dependencies' key.")
+            for state, job_ids in dependencies.items():
+                if state not in drmr.JOB_DEPENDENCY_STATES:
+                    raise ValueError('Unsupported dependency state: %s' % state)
+
+                dependency_list.append('after%s:%s' % (state, ':'.join(str(job_id) for job_id in job_ids)))
+            job_data['dependency_list'] = ','.join(dependency_list)
 
     def set_mail_events(self, job_data):
         if job_data.get('mail_events'):

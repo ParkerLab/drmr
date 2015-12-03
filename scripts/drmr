@@ -8,7 +8,9 @@
 from __future__ import print_function
 
 import argparse
+import copy
 import getpass
+import logging
 import os
 import re
 import sys
@@ -18,12 +20,20 @@ import drmr
 import drmr.script
 
 HELP = """
-    drmr will read configuration from your ~/.drmrc, e.g.:
+
+    drmr will read configuration from your ~/.drmrc, which must be
+    valid JSON and contain at least the name of the resource manager you
+    use, e.g:
 
     {{
         "resource_manager": "slurm",
-        "account": "parkerlab",
     }}
+
+    Supported resource managers are:
+
+{resource_managers}
+
+    You can also specify default values for any job parameters listed below.
 
     Directives
     ==========
@@ -36,7 +46,7 @@ HELP = """
       Drmr by default runs all the script's commands
       concurrently. The wait directive tells drmr to wait for
       any jobs started since the last wait directive, or the
-      beginning of the script, to finish.
+      beginning of the script, to complete successfully.
 
     # drmr:job
 
@@ -132,7 +142,8 @@ HELP = """
     # Its job ID will be printed.
 
 """.format(**{
-    'job_directives': '\n'.join('      {}: {}'.format(*i) for i in drmr.JOB_DIRECTIVES.items())
+    'job_directives': '\n'.join('      {}: {}'.format(*i) for i in drmr.script.JOB_DIRECTIVES.items()),
+    'resource_managers': '\n'.join('      {}'.format(name) for name in drmr.RESOURCE_MANAGERS.keys()),
 })
 
 def parse_arguments():
@@ -142,13 +153,13 @@ def parse_arguments():
         epilog=textwrap.dedent(HELP)
     )
 
-    parser.add_argument('-j', '--job-name', dest='job_name', required=True, help='The master PBS job name.')
-    parser.add_argument('-a', '--flux-account', dest='account', help='The Flux account to be billed for the jobs.')
+    parser.add_argument('-a', '--account', dest='account', help='The account to be billed for the jobs.')
+    parser.add_argument('-d', '--destination', dest='destination', help='The queue/partition in which to run the jobs.')
+    parser.add_argument('--debug', dest='debug', action='store_true', help='Turn on debug-level logging.')
+    parser.add_argument('-j', '--job-name', dest='job_name', required=True, help='The job name.')
     parser.add_argument('-m', '--mail-at-finish', dest='mail_at_finish', action='store_true', help='If specified, mail will be sent when all jobs are finished.')
-    parser.add_argument('-q', '--flux-queue', dest='queue', help='The Flux queue in which to run the jobs.')
-
     parser.add_argument('-w', '--wait-list', dest='wait_list', help="A colon-separated list of job IDs that must complete before any of this script's jobs are started.")
-    parser.add_argument('input', help='The file containing commands to submit to Flux. Use "-" for stdin.')
+    parser.add_argument('input', help='The file containing commands to submit. Use "-" for stdin.')
 
     return parser.parse_args()
 
@@ -160,8 +171,8 @@ def make_wait_list_note(wait_list):
     return note
 
 
-def create_jobs(template_data, commands, wait_list=[], mail_at_finish=False):
-    master_job_name = template_data['name']
+def create_jobs(resource_manager, template_data, commands, wait_list=[], mail_at_finish=False):
+    master_job_name = template_data['job_name']
     all_jobs = []
     prereqs = wait_list[:]
     job_directives = {}
@@ -169,7 +180,7 @@ def create_jobs(template_data, commands, wait_list=[], mail_at_finish=False):
     for command in commands:
         job_name = master_job_name + '.%s' % i
 
-        job_data = template_data.copy()
+        job_data = copy.deepcopy(template_data)
         job_data.update({
             'job_name': job_name
         })
@@ -179,10 +190,10 @@ def create_jobs(template_data, commands, wait_list=[], mail_at_finish=False):
             if directive == 'wait' and wait_list:
                 i += 1
                 job_data['notes'] = make_wait_list_note(wait_list)
-                job_id = drmr.submit_completion_jobs(job_data, [w[0] for w in wait_list])
+                job_id = resource_manager.submit_completion_jobs(job_data, [w[0] for w in wait_list])
                 wait_list = [(job_id, job_name + '.success')]
                 prereqs = wait_list[:]
-            elif directive == 'pbs' and args:
+            elif directive == 'job' and args:
                 if args == 'default':
                     job_directives = {}
                 else:
@@ -192,16 +203,17 @@ def create_jobs(template_data, commands, wait_list=[], mail_at_finish=False):
             job_data.update(job_directives)
             job_data['command'] = command
             if prereqs:
-                job_data['dependencies'] = [prereq_id for prereq_id, prereq_name in prereqs]
+                job_data['dependencies'] = {'ok': [prereq_id for prereq_id, prereq_name in prereqs]}
                 job_data['notes'] = make_wait_list_note(prereqs)
-            job_file = drmr.create_job_file(job_data)
-            job_id = drmr.submit(job_file)
+            logging.debug('Writing job file for {}'.format(job_data))
+            job_file = resource_manager.write_job_file(job_data)
+            job_id = resource_manager.submit(job_file)
             wait_list.append((job_id, job_name))
             all_jobs.append(job_id)
 
-    completion_data = template_data.copy()
+    completion_data = copy.deepcopy(template_data)
     completion_data['notes'] = make_wait_list_note(wait_list)
-    completion_job_id = drmr.submit_completion_jobs(completion_data, [w[0] for w in wait_list], mail_at_finish=mail_at_finish)
+    completion_job_id = resource_manager.submit_completion_jobs(completion_data, [w[0] for w in wait_list], mail_at_finish=mail_at_finish)
 
     return all_jobs, completion_job_id
 
@@ -212,9 +224,18 @@ if __name__ == '__main__':
 
     config = drmr.load_configuration({'account': args.account, 'destination': args.destination})
 
+    if 'resource_manager' not in config:
+        print('Please specify your resource manager in your drmr configuration file.', file=sys.stderr)
+        sys.exit(1)
+
+    if args.debug:
+        logging.basicConfig(level=logging.DEBUG)
+
+    rm = drmr.get_resource_manager(config['resource_manager'])
+
     template_data = {
         'account': config['account'],
-        'destination': config['queue'],
+        'destination': config['destination'],
         'job_name': args.job_name,
         'working_directory': os.path.abspath(os.getcwd()),
     }
@@ -224,7 +245,7 @@ if __name__ == '__main__':
 
     wait_list = args.wait_list and args.wait_list.split(':') or []
     try:
-        all_jobs, completion_job_id = create_jobs(template_data, commands, wait_list, mail_at_finish=args.mail_at_finish)
+        all_jobs, completion_job_id = create_jobs(rm, template_data, commands, wait_list, mail_at_finish=args.mail_at_finish)
     except drmr.SubmissionError as e:
         print('\nYour script could not be submitted.')
         print("Command '%s' returned %s." % (' '.join(e.cmd), e.returncode))
@@ -232,14 +253,6 @@ if __name__ == '__main__':
         sys.exit(1)
 
     if all_jobs:
-        canceller_filename = '%s.cancel' % args.job_name
-        with open(canceller_filename, 'w') as canceller:
-            canceller.write('#!/bin/sh\n\n')
-            for job in all_jobs:
-                canceller.write('qdel %s\n' % job)
-            canceller.write('qdel %s\n' % completion_job_id)
-            os.chmod(canceller_filename, 0o755)
-
         print(completion_job_id)
     else:
         print('No jobs submitted. Check your script.')

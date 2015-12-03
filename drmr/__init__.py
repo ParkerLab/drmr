@@ -24,32 +24,32 @@ class SubmissionError(subprocess.CalledProcessError):
     pass
 
 
+RESOURCE_MANAGERS = {
+    'slurm': drmr.drm.Slurm,
+    'pbs': drmr.drm.PBS,
+}
+
 MAIL_EVENTS = [
     'BEGIN',
     'END',
     'FAIL',
 ]
 
+JOB_DEPENDENCY_STATES = ['any', 'notok', 'ok', 'start']
 
 JOB_DIRECTIVES = {
     "account": "The account to which the job will be billed.",
-    "dependencies": "A list of job IDs which must complete successfully before this job is run.",
+    "dependencies": "A map of states ({}) to lists of job IDs which must end in the specified state.".format(JOB_DEPENDENCY_STATES),
     "destination": "The execution environment (queue, partition, etc.) for the job.",
     "environment_setup": "Additional commands to execute to prepare the job environment.",
-    "mail_events": "A list of job events (from the set {}) that will trigger email notifications.".format(MAIL_EVENTS),
-    "name": "A name for the job.",
+    "mail_events": "A list of job events ({}) that will trigger email notifications.".format(MAIL_EVENTS),
+    "job_name": "A name for the job.",
     "nodes": "The number of nodes required for the job.",
     "processors": "The number of cores on each node required for the job.",
     "processor_memory": "The number of memory required for the job, per processor.",
     "email": "The submitter's email address, for notifications.",
     "time_limit": "The maximum amount of time the DRM should allow the job, in HH:MM:SS format.",
     "working_directory": "The directory where the job should be run.",
-}
-
-
-RESOURCE_MANAGERS = {
-    'slurm': drmr.drm.Slurm,
-    'pbs': drmr.drm.PBS,
 }
 
 
