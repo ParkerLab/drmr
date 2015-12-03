@@ -171,13 +171,13 @@ def make_wait_list_note(wait_list):
     return note
 
 
-def create_jobs(resource_manager, template_data, commands, wait_list=[], mail_at_finish=False):
+def create_jobs(resource_manager, template_data, script, wait_list=[], mail_at_finish=False):
     master_job_name = template_data['job_name']
     all_jobs = []
     prereqs = wait_list[:]
     job_directives = {}
     i = 1
-    for command in commands:
+    for line in script:
         job_name = master_job_name + '.%s' % i
 
         job_data = copy.deepcopy(template_data)
@@ -185,7 +185,7 @@ def create_jobs(resource_manager, template_data, commands, wait_list=[], mail_at
             'job_name': job_name
         })
 
-        directive, args = drmr.script.parse_directive(command)
+        directive, args = drmr.script.parse_directive(line)
         if directive:
             if directive == 'wait' and wait_list:
                 i += 1
@@ -201,7 +201,7 @@ def create_jobs(resource_manager, template_data, commands, wait_list=[], mail_at
         else:
             i += 1
             job_data.update(job_directives)
-            job_data['command'] = command
+            job_data['command'] = line
             if prereqs:
                 job_data['dependencies'] = {'ok': [prereq_id for prereq_id, prereq_name in prereqs]}
                 job_data['notes'] = make_wait_list_note(prereqs)
@@ -241,11 +241,11 @@ if __name__ == '__main__':
     }
 
     input_file = args.input == '-' and sys.stdin or open(args.input)
-    commands = drmr.script.parse_script(input_file.read())
+    script = drmr.script.parse_script(input_file.read())
 
     wait_list = args.wait_list and args.wait_list.split(':') or []
     try:
-        all_jobs, completion_job_id = create_jobs(rm, template_data, commands, wait_list, mail_at_finish=args.mail_at_finish)
+        all_jobs, completion_job_id = create_jobs(rm, template_data, script, wait_list, mail_at_finish=args.mail_at_finish)
     except drmr.SubmissionError as e:
         print('\nYour script could not be submitted.')
         print("Command '%s' returned %s." % (' '.join(e.cmd), e.returncode))
