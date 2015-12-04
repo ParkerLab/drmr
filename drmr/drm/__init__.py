@@ -11,6 +11,7 @@ from __future__ import print_function
 
 import collections
 import copy
+import inspect
 import logging
 import os
 import re
@@ -35,6 +36,11 @@ class DistributedResourceManager(object):
 
     def capture_process_output(self, command=[]):
         return subprocess.check_output(command, stderr=subprocess.STDOUT, universal_newlines=True)
+
+    def get_method_logger(self):
+        stack = inspect.getouterframes(inspect.currentframe())
+        caller = stack[1][3]
+        return logging.getLogger("{}.{}.{}".format(self.__module__, self.__class__.__name__, caller))
 
     def is_installed(self):
         raise NotImplementedError
@@ -146,7 +152,7 @@ class DistributedResourceManager(object):
     def write_job_file(self, job_data):
         """Write a batch script to be submitted to the resource manager."""
 
-        logger = logging.getLogger("{}.{}".format(self.__module__, self.__class__.__name__ ))
+        logger = self.get_method_logger()
         logger.debug('Writing job file for {}'.format(job_data))
 
         job_filename = self.make_job_filename(job_data)
@@ -228,7 +234,6 @@ class PBS(DistributedResourceManager):
     array_job_id_re = re.compile('^\S+\[.*\]')
 
     def is_installed(self):
-        logger = logging.getLogger("{}.{}".format(self.__module__, self.__class__.__name__ ))
         output = ''
         try:
             output = self.capture_process_output(['qmgr', '-c', 'list server'])
@@ -264,6 +269,9 @@ class PBS(DistributedResourceManager):
             )
 
     def submit(self, job_filename):
+        if not self.is_installed():
+            raise drmr.ConfigurationError('{} is not installed or not usable.'.format(self.name))
+
         try:
             command = ['qsub', job_filename]
             job_id = self.capture_process_output(command)
@@ -350,9 +358,7 @@ class Slurm(DistributedResourceManager):
         return 'slurm' in output
 
     def set_dependencies(self, job_data):
-        logger = logging.getLogger("{}.{}".format(self.__module__, self.__class__.__name__ ))
         dependencies = job_data.get('dependencies')
-        logger.debug('job {job_name} dependencies: {dependencies}'.format(**job_data))
         if dependencies:
             dependency_list = []
             if not isinstance(dependencies, collections.Mapping):
@@ -373,6 +379,9 @@ class Slurm(DistributedResourceManager):
             )
 
     def submit(self, job_filename):
+        if not self.is_installed():
+            raise drmr.ConfigurationError('{} is not installed or not usable.'.format(self.name))
+
         try:
             command = ['sbatch', '--parsable', job_filename]
             job_id = self.capture_process_output(command)

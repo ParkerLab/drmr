@@ -2,17 +2,21 @@
 # -*- coding: utf-8 -*-
 
 #
-# Submit a drmr script to a distributed resource manager
+# drmr: A tool for submitting pipeline scripts to distributed resource
+# managers.
 #
+# Copyright 2015 The Parker Lab at the University of Michigan
+#
+# Licensed under Version 3 of the GPL or any later version
+#
+
 
 from __future__ import print_function
 
 import argparse
 import copy
-import getpass
 import logging
 import os
-import re
 import sys
 import textwrap
 
@@ -220,7 +224,11 @@ if __name__ == '__main__':
     if args.debug:
         logging.basicConfig(level=logging.DEBUG)
 
-    config = drmr.load_configuration({'account': args.account, 'destination': args.destination})
+    try:
+        config = drmr.load_configuration({'account': args.account, 'destination': args.destination})
+    except drmr.ConfigurationError as e:
+        print(e, file=sys.stderr)
+        sys.exit(1)
 
     if 'resource_manager' not in config:
         print('Please specify your resource manager in your drmr configuration file.', file=sys.stderr)

@@ -86,8 +86,17 @@ def load_configuration(config={}, file=None):
             config['resource_manager'] = guess_resource_manager()
             logger.debug("""No resource manager configured, so I'm going with the one I found, {}.""".format(config['resource_manager']))
         except ConfigurationError as e:
-            raise ConfigurationError('Could not determine your resource manager ({}). Please specify it in your ~/.drmrc under "resource_manager".'.format(e))
+            available_resource_managers = get_available_resource_managers()
+            raise ConfigurationError("""Could not determine your resource manager.\n{}\nPlease specify the one you're using in your ~/.drmrc under "resource_manager", e.g.:\n\n{{"resource_manager": "{}"}}\n""".format(e, available_resource_managers and available_resource_managers[0] or 'Slurm'))
     return config
+
+
+def get_available_resource_managers():
+    available_resource_managers = []
+    for name, rm in RESOURCE_MANAGERS.items():
+        if rm().is_installed():
+            available_resource_managers.append(name)
+    return available_resource_managers
 
 
 def get_resource_manager(name):
@@ -102,11 +111,7 @@ def guess_resource_manager():
 
     logger = logging.getLogger("{}.{}".format(__name__, guess_resource_manager.__name__ ))
 
-    available_resource_managers = []
-    for name, rm in RESOURCE_MANAGERS.items():
-        if rm().is_installed():
-            available_resource_managers.append(name)
-
+    available_resource_managers = get_available_resource_managers()
     if available_resource_managers:
         logger.debug('Available resource managers: {}'.format(available_resource_managers))
         if len(available_resource_managers) > 1:
