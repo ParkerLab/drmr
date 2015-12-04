@@ -70,7 +70,7 @@ def load_configuration(config={}, file=None):
 
     """
 
-    logger = logging.getLogger("{}.{}".format(__name__, load_configuration.__name__ ))
+    logger = logging.getLogger("{}.{}".format(__name__, load_configuration.__name__))
 
     if not file:
         file = os.path.expanduser('~/.drmrc')
@@ -109,7 +109,7 @@ def get_resource_manager(name):
 def guess_resource_manager():
     """Try to determine the resource manager in use."""
 
-    logger = logging.getLogger("{}.{}".format(__name__, guess_resource_manager.__name__ ))
+    logger = logging.getLogger("{}.{}".format(__name__, guess_resource_manager.__name__))
 
     available_resource_managers = get_available_resource_managers()
     if available_resource_managers:

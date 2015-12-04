@@ -22,6 +22,7 @@ import textwrap
 import jinja2
 
 import drmr
+import drmr.util
 
 
 class DistributedResourceManager(object):
@@ -37,21 +38,28 @@ class DistributedResourceManager(object):
     def capture_process_output(self, command=[]):
         return subprocess.check_output(command, stderr=subprocess.STDOUT, universal_newlines=True)
 
+    def validate_destination(self, destination):
+        """Verifies that the given destination is valid."""
+        raise NotImplementedError
+
     def get_method_logger(self):
         stack = inspect.getouterframes(inspect.currentframe())
         caller = stack[1][3]
         return logging.getLogger("{}.{}.{}".format(self.__module__, self.__class__.__name__, caller))
 
     def is_installed(self):
+        """Verifies that the resource manager is installed."""
         raise NotImplementedError
 
     def make_control_directory(self, job_data):
+        """Create the control directory for submitted jobs."""
         self.set_control_directory(job_data)
-        makedirs(job_data['control_directory'])
+        drmr.util.makedirs(job_data['control_directory'])
 
     def make_job_filename(self, job_data):
+        """Create a name for the job file in the control directory."""
         self.make_control_directory(job_data)
-        return absjoin(job_data['control_directory'], job_data['job_name'] + '.' + self.name.lower())
+        return drmr.util.absjoin(job_data['control_directory'], job_data['job_name'] + '.' + self.name.lower())
 
     def make_job_template(self, job_data):
         """Format a job template, suitable for submission to the DRM."""
@@ -60,6 +68,7 @@ class DistributedResourceManager(object):
         return template_environment.from_string(self.default_job_template).render(**template_data)
 
     def make_job_template_data(self, job_data):
+        """Prepare the job data for interpolation into the job file template."""
         template_data = {}
         template_data.update(copy.deepcopy(self.default_job_data))
         template_data.update(job_data)
@@ -77,7 +86,8 @@ class DistributedResourceManager(object):
         return template_data
 
     def set_control_directory(self, job_data):
-        control_path = absjoin(job_data.get('working_directory', ''), '.drmr')
+        """Add the path of the control directory to the job data."""
+        control_path = drmr.util.absjoin(job_data.get('working_directory', ''), '.drmr')
         job_data['control_directory'] = control_path
         return control_path
 
@@ -241,7 +251,6 @@ class PBS(DistributedResourceManager):
             pass
         return 'pbs_version = ' in output
 
-
     def set_dependencies(self, job_data):
         dependencies = job_data.get('dependencies')
         if dependencies:
@@ -278,6 +287,21 @@ class PBS(DistributedResourceManager):
             return job_id.strip()
         except subprocess.CalledProcessError as e:
             raise drmr.SubmissionError(e.returncode, e.cmd, e.output)
+
+    def validate_destination(self, destination):
+        if not self.is_installed():
+            raise drmr.ConfigurationError('{} is not installed or not usable.'.format(self.name))
+
+        valid = False
+        try:
+            command = ['qstat', '-Q', '-f', destination]
+            status = self.capture_process_output(command)
+            if status.startswith('Queue: {}'.format(destination)):
+                valid = True
+        except:
+            pass
+
+        return valid
 
 
 class Slurm(DistributedResourceManager):
@@ -389,21 +413,17 @@ class Slurm(DistributedResourceManager):
         except subprocess.CalledProcessError as e:
             raise drmr.SubmissionError(e.returncode, e.cmd, e.output)
 
+    def validate_destination(self, destination):
+        if not self.is_installed():
+            raise drmr.ConfigurationError('{} is not installed or not usable.'.format(self.name))
 
-def makedirs(*paths):
-    """
-    Creates each path given.
+        valid = False
+        try:
+            command = ['scontrol', 'show', 'partition', destination]
+            status = self.capture_process_output(command)
+            if status.startswith('PartitionName={}'.format(destination)):
+                valid = True
+        except:
+            pass
 
-    An exception will be raised if any path exists and is not a directory.
-    """
-    for path in paths:
-        if os.path.lexists(path):
-            if not os.path.isdir(path):
-                raise ValueError('Path exists but is not a directory: %s' % path)
-        else:
-            os.makedirs(path)
-
-
-def absjoin(*paths):
-    """Simple combination of os.path.abspath and os.path.join."""
-    return os.path.abspath(os.path.join(*paths))
+        return valid
