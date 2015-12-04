@@ -14,10 +14,15 @@ __version__ = '0.1.0'
 
 
 import json
+import logging
 import os
 import subprocess
 
 import drmr.drm
+
+
+class ConfigurationError(EnvironmentError):
+    pass
 
 
 class SubmissionError(subprocess.CalledProcessError):
@@ -25,8 +30,8 @@ class SubmissionError(subprocess.CalledProcessError):
 
 
 RESOURCE_MANAGERS = {
-    'slurm': drmr.drm.Slurm,
-    'pbs': drmr.drm.PBS,
+    'PBS': drmr.drm.PBS,
+    'Slurm': drmr.drm.Slurm,
 }
 
 MAIL_EVENTS = [
@@ -38,18 +43,18 @@ MAIL_EVENTS = [
 JOB_DEPENDENCY_STATES = ['any', 'notok', 'ok', 'start']
 
 JOB_DIRECTIVES = {
-    "account": "The account to which the job will be billed.",
-    "dependencies": "A map of states ({}) to lists of job IDs which must end in the specified state.".format(JOB_DEPENDENCY_STATES),
-    "destination": "The execution environment (queue, partition, etc.) for the job.",
-    "environment_setup": "Additional commands to execute to prepare the job environment.",
-    "mail_events": "A list of job events ({}) that will trigger email notifications.".format(MAIL_EVENTS),
-    "job_name": "A name for the job.",
-    "nodes": "The number of nodes required for the job.",
-    "processors": "The number of cores on each node required for the job.",
-    "processor_memory": "The number of memory required for the job, per processor.",
-    "email": "The submitter's email address, for notifications.",
-    "time_limit": "The maximum amount of time the DRM should allow the job, in HH:MM:SS format.",
-    "working_directory": "The directory where the job should be run.",
+    'account': 'The account to which the job will be billed.',
+    'dependencies': 'A map of states ({}) to lists of job IDs which must end in the specified state.'.format(JOB_DEPENDENCY_STATES),
+    'destination': 'The execution environment (queue, partition, etc.) for the job.',
+    'environment_setup': 'Additional commands to execute to prepare the job environment.',
+    'mail_events': 'A list of job events ({}) that will trigger email notifications.'.format(MAIL_EVENTS),
+    'job_name': 'A name for the job.',
+    'nodes': 'The number of nodes required for the job.',
+    'processors': 'The number of cores on each node required for the job.',
+    'processor_memory': 'The number of memory required for the job, per processor.',
+    'email': """The submitter's email address, for notifications.""",
+    'time_limit': 'The maximum amount of time the DRM should allow the job, in HH:MM:SS format.',
+    'working_directory': 'The directory where the job should be run.',
 }
 
 
@@ -65,18 +70,47 @@ def load_configuration(config={}, file=None):
 
     """
 
+    logger = logging.getLogger("{}.{}".format(__name__, load_configuration.__name__ ))
+
     if not file:
-        file = os.path.expanduser("~/.drmrc")
+        file = os.path.expanduser('~/.drmrc')
     if os.path.exists(file):
         with open(file) as rc:
             rc = json.load(rc)
         for k, v in rc.items():
             if not config.get(k):
                 config[k] = rc[k]
+
+    if 'resource_manager' not in config:
+        try:
+            config['resource_manager'] = guess_resource_manager()
+            logger.debug("""No resource manager configured, so I'm going with the one I found, {}.""".format(config['resource_manager']))
+        except ConfigurationError as e:
+            raise ConfigurationError('Could not determine your resource manager ({}). Please specify it in your ~/.drmrc under "resource_manager".'.format(e))
     return config
 
 
 def get_resource_manager(name):
+    """Given the name of a resource manager, return an instance of it."""
     if name in RESOURCE_MANAGERS:
         return RESOURCE_MANAGERS[name]()
     raise KeyError('Unrecognized resource manager "{}"'.format(name))
+
+
+def guess_resource_manager():
+    """Try to determine the resource manager in use."""
+
+    logger = logging.getLogger("{}.{}".format(__name__, guess_resource_manager.__name__ ))
+
+    available_resource_managers = []
+    for name, rm in RESOURCE_MANAGERS.items():
+        if rm().is_installed():
+            available_resource_managers.append(name)
+
+    if available_resource_managers:
+        logger.debug('Available resource managers: {}'.format(available_resource_managers))
+        if len(available_resource_managers) > 1:
+            raise ConfigurationError('Multiple resource managers are available: {}'.format(available_resource_managers))
+        return available_resource_managers[0]
+    else:
+        raise ConfigurationError('No recognized resource manager found.')

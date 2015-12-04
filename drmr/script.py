@@ -53,7 +53,8 @@ def is_directive(line):
 
 def parse_directive(line):
     """Parse a drmr directive from the line, returning a tuple of the directive and its arguments."""
-    logger = logging.getLogger('drmr.script.parse_directive')
+    logger = logging.getLogger("{}.{}".format(__name__, parse_directive.__name__ ))
+
     directive = args = None
     match = DIRECTIVE_RE.match(line)
     if match:

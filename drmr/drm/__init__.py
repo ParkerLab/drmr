@@ -24,7 +24,7 @@ import drmr
 
 
 class DistributedResourceManager(object):
-    name = "Base Distributed Resource Manager"
+    name = 'Base Distributed Resource Manager'
     default_job_template = ''
 
     def __init__(self):
@@ -33,13 +33,19 @@ class DistributedResourceManager(object):
             'environment_setup': [],
         }
 
+    def capture_process_output(self, command=[]):
+        return subprocess.check_output(command, stderr=subprocess.STDOUT, universal_newlines=True)
+
+    def is_installed(self):
+        raise NotImplementedError
+
     def make_control_directory(self, job_data):
         self.set_control_directory(job_data)
         makedirs(job_data['control_directory'])
 
     def make_job_filename(self, job_data):
         self.make_control_directory(job_data)
-        return absjoin(job_data['control_directory'], job_data['job_name'] + '.' + self.name)
+        return absjoin(job_data['control_directory'], job_data['job_name'] + '.' + self.name.lower())
 
     def make_job_template(self, job_data):
         """Format a job template, suitable for submission to the DRM."""
@@ -86,13 +92,12 @@ class DistributedResourceManager(object):
             job_data['working_directory'] = os.getcwd()
 
     def submit(self, job_file):
-        """
-        Submit a job file. Return the job ID.
-        """
+        """Submit a job file. Return the job ID."""
         raise NotImplementedError
 
     def submit_completion_jobs(self, job_data, job_list, mail_at_finish=False):
         """Submit two jobs: one to record success, and one just to record completion."""
+
         if not job_list:
             raise ValueError('You did not supply a list of job IDs to wait for.')
 
@@ -139,14 +144,20 @@ class DistributedResourceManager(object):
         return success_job_id
 
     def write_job_file(self, job_data):
+        """Write a batch script to be submitted to the resource manager."""
+
+        logger = logging.getLogger("{}.{}".format(self.__module__, self.__class__.__name__ ))
+        logger.debug('Writing job file for {}'.format(job_data))
+
         job_filename = self.make_job_filename(job_data)
         with open(job_filename, 'w') as job_file:
             job_file.write(self.make_job_template(job_data))
+
         return job_filename
 
 
 class PBS(DistributedResourceManager):
-    name = "pbs"
+    name = 'PBS'
 
     default_job_template = textwrap.dedent(
         """
@@ -175,7 +186,7 @@ class PBS(DistributedResourceManager):
         {%- endif %}
         #PBS -l nodes={{nodes|default(1)}}
         #PBS -l procs={{processors|default(1)}}
-        #PBS -l pmem={{processor_memory|default("4000m")}}
+        #PBS -l pmem={{processor_memory|default('4000m')}}
         {%- if time_limit %}
         #PBS -l walltime={{time_limit}}
         {%- endif %}
@@ -216,12 +227,22 @@ class PBS(DistributedResourceManager):
 
     array_job_id_re = re.compile('^\S+\[.*\]')
 
+    def is_installed(self):
+        logger = logging.getLogger("{}.{}".format(self.__module__, self.__class__.__name__ ))
+        output = ''
+        try:
+            output = self.capture_process_output(['qmgr', '-c', 'list server'])
+        except:
+            pass
+        return 'pbs_version = ' in output
+
+
     def set_dependencies(self, job_data):
         dependencies = job_data.get('dependencies')
         if dependencies:
             dependency_list = []
             if not isinstance(dependencies, collections.Mapping):
-                raise ValueError("Job data does not contain a map under the 'dependencies' key.")
+                raise ValueError('Job data does not contain a map under the "dependencies" key.')
             for state, job_ids in dependencies.items():
                 if state not in drmr.JOB_DEPENDENCY_STATES:
                     raise ValueError('Unsupported dependency state: %s' % state)
@@ -245,14 +266,14 @@ class PBS(DistributedResourceManager):
     def submit(self, job_filename):
         try:
             command = ['qsub', job_filename]
-            job_id = subprocess.check_output(command, stderr=subprocess.STDOUT, universal_newlines=True)
+            job_id = self.capture_process_output(command)
             return job_id.strip()
         except subprocess.CalledProcessError as e:
             raise drmr.SubmissionError(e.returncode, e.cmd, e.output)
 
 
 class Slurm(DistributedResourceManager):
-    name = "slurm"
+    name = 'Slurm'
 
     default_job_template = textwrap.dedent(
         """
@@ -280,7 +301,7 @@ class Slurm(DistributedResourceManager):
         {%- endif %}
         #SBATCH --nodes={{nodes|default(1)}}
         #SBATCH --ntasks={{processors|default(1)}}
-        #SBATCH --mem-per-cpu={{processor_memory|default("4000m")}}
+        #SBATCH --mem-per-cpu={{processor_memory|default('4000m')}}
         {%- if time_limit %}
         #SBATCH --time={{time_limit}}
         {%- endif %}
@@ -319,14 +340,23 @@ class Slurm(DistributedResourceManager):
         'FAIL': 'FAIL',
     }
 
+    def is_installed(self):
+        output = ''
+        try:
+            output = self.capture_process_output(['scontrol', 'version'])
+        except:
+            pass
+
+        return 'slurm' in output
+
     def set_dependencies(self, job_data):
-        logger = logging.getLogger()
+        logger = logging.getLogger("{}.{}".format(self.__module__, self.__class__.__name__ ))
         dependencies = job_data.get('dependencies')
         logger.debug('job {job_name} dependencies: {dependencies}'.format(**job_data))
         if dependencies:
             dependency_list = []
             if not isinstance(dependencies, collections.Mapping):
-                raise ValueError("Job data does not contain a map under the 'dependencies' key.")
+                raise ValueError('Job data does not contain a map under the "dependencies" key.')
             for state, job_ids in dependencies.items():
                 if state not in drmr.JOB_DEPENDENCY_STATES:
                     raise ValueError('Unsupported dependency state: %s' % state)
@@ -345,14 +375,15 @@ class Slurm(DistributedResourceManager):
     def submit(self, job_filename):
         try:
             command = ['sbatch', '--parsable', job_filename]
-            job_id = subprocess.check_output(command, stderr=subprocess.STDOUT, universal_newlines=True)
+            job_id = self.capture_process_output(command)
             return job_id.strip().split(';')[0]
         except subprocess.CalledProcessError as e:
             raise drmr.SubmissionError(e.returncode, e.cmd, e.output)
 
 
 def makedirs(*paths):
-    """Creates each path given.
+    """
+    Creates each path given.
 
     An exception will be raised if any path exists and is not a directory.
     """

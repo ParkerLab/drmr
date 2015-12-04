@@ -24,7 +24,7 @@ setup(
     author="The Parker Lab",
     author_email='parkerlab-software@umich.edu',
     url='https://github.com/ParkerLab/drmr',
-    packages=['drmr',],
+    packages=['drmr', 'drmr.drm'],
     scripts=[
         'scripts/drmr',
     ],

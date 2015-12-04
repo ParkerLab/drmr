@@ -21,17 +21,12 @@ import drmr.script
 
 HELP = """
 
-    drmr will read configuration from your ~/.drmrc, which must be
-    valid JSON and contain at least the name of the resource manager you
-    use, e.g:
-
-    {{
-        "resource_manager": "slurm",
-    }}
-
     Supported resource managers are:
 
 {resource_managers}
+
+    drmr will read configuration from your ~/.drmrc, which must be
+    valid JSON.
 
     You can also specify default values for any job parameters listed below.
 
@@ -101,8 +96,8 @@ HELP = """
     #
     # Line continuations are OK.
     #
-    echo thing1 \
-         thing2 \
+    echo thing1 \\
+         thing2 \\
          thing3
 
     #
@@ -205,7 +200,7 @@ def create_jobs(resource_manager, template_data, script, wait_list=[], mail_at_f
             if prereqs:
                 job_data['dependencies'] = {'ok': [prereq_id for prereq_id, prereq_name in prereqs]}
                 job_data['notes'] = make_wait_list_note(prereqs)
-            logging.debug('Writing job file for {}'.format(job_data))
+
             job_file = resource_manager.write_job_file(job_data)
             job_id = resource_manager.submit(job_file)
             wait_list.append((job_id, job_name))
@@ -222,14 +217,14 @@ if __name__ == '__main__':
 
     args = parse_arguments()
 
+    if args.debug:
+        logging.basicConfig(level=logging.DEBUG)
+
     config = drmr.load_configuration({'account': args.account, 'destination': args.destination})
 
     if 'resource_manager' not in config:
         print('Please specify your resource manager in your drmr configuration file.', file=sys.stderr)
         sys.exit(1)
-
-    if args.debug:
-        logging.basicConfig(level=logging.DEBUG)
 
     rm = drmr.get_resource_manager(config['resource_manager'])
 
