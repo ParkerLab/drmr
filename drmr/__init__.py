@@ -44,6 +44,7 @@ JOB_DEPENDENCY_STATES = ['any', 'notok', 'ok', 'start']
 
 JOB_DIRECTIVES = {
     'account': 'The account to which the job will be billed.',
+    'array_control': 'A dictionary of integer values for keys array_index_min, array_index_max, and array_concurrent_jobs.',
     'dependencies': 'A map of states ({}) to lists of job IDs which must end in the specified state.'.format(JOB_DEPENDENCY_STATES),
     'destination': 'The execution environment (queue, partition, etc.) for the job.',
     'environment_setup': 'Additional commands to execute to prepare the job environment.',

@@ -27,6 +27,7 @@ setup(
     packages=['drmr', 'drmr.drm'],
     scripts=[
         'scripts/drmr',
+        'scripts/drmrarray',
         'scripts/drmr_configure',
     ],
     include_package_data=True,

@@ -28,6 +28,13 @@ import drmr.util
 class DistributedResourceManager(object):
     name = 'Base Distributed Resource Manager'
     default_job_template = ''
+    default_array_command_template = textwrap.dedent(
+        """
+        if [ "$THE_DRM_ARRAY_JOB_INDEX_ID" = "{index}" ]; then
+            {command}
+        fi
+        """
+    )
 
     def __init__(self):
         self.default_job_data = {
@@ -61,13 +68,17 @@ class DistributedResourceManager(object):
         self.make_control_directory(job_data)
         return drmr.util.absjoin(job_data['control_directory'], job_data['job_name'] + '.' + self.name.lower())
 
-    def make_job_template(self, job_data):
+    def make_array_command(self, command_data):
+        template_environment = jinja2.Environment()
+        return template_environment.from_string(self.default_array_command_template).render(**command_data)
+
+    def make_job_script(self, job_data):
         """Format a job template, suitable for submission to the DRM."""
-        template_data = self.make_job_template_data(job_data)
+        template_data = self.make_job_script_data(job_data)
         template_environment = jinja2.Environment()
         return template_environment.from_string(self.default_job_template).render(**template_data)
 
-    def make_job_template_data(self, job_data):
+    def make_job_script_data(self, job_data):
         """Prepare the job data for interpolation into the job file template."""
         template_data = {}
         template_data.update(copy.deepcopy(self.default_job_data))
@@ -75,9 +86,9 @@ class DistributedResourceManager(object):
 
         self.set_control_directory(template_data)
         self.set_working_directory(template_data)
-        self.set_mail_events(template_data)
+        self.set_mail_event_string(template_data)
         self.set_job_name(template_data)
-        self.set_dependencies(template_data)
+        self.set_dependency_string(template_data)
 
         python_virtualenv = os.getenv('VIRTUAL_ENV')
         if python_virtualenv:
@@ -87,11 +98,11 @@ class DistributedResourceManager(object):
 
     def set_control_directory(self, job_data):
         """Add the path of the control directory to the job data."""
-        control_path = drmr.util.absjoin(job_data.get('working_directory', ''), '.drmr')
+        control_path = drmr.util.absjoin(job_data.get('working_directory', os.getcwd()), '.drmr')
         job_data['control_directory'] = control_path
         return control_path
 
-    def set_dependencies(self, job_data):
+    def set_dependency_string(self, job_data):
         """Convert the map of dependency states to job IDs to the string format required by the DRM."""
         raise NotImplementedError
 
@@ -99,7 +110,7 @@ class DistributedResourceManager(object):
         if 'job_name' not in job_data:
             job_data['job_name'] = uuid.uuid4()
 
-    def set_mail_events(self, job_data):
+    def set_mail_event_string(self, job_data):
         """Convert the list of mail events to the string format required by the DRM."""
         raise NotImplementedError
 
@@ -121,7 +132,7 @@ class DistributedResourceManager(object):
         common_data.update({
             'walltime': '00:15:00',  # not really, but ARC suggest that it be the minimum for any job
         })
-        common_data = self.make_job_template_data(common_data)
+        common_data = self.make_job_script_data(common_data)
 
         #
         # The happy path: all jobs completed; we're done, or on to the
@@ -167,7 +178,7 @@ class DistributedResourceManager(object):
 
         job_filename = self.make_job_filename(job_data)
         with open(job_filename, 'w') as job_file:
-            job_file.write(self.make_job_template(job_data))
+            job_file.write(self.make_job_script(job_data))
 
         return job_filename
 
@@ -190,12 +201,12 @@ class PBS(DistributedResourceManager):
         {%- if email %}
         #PBS -M {{email}}
         {%- endif %}
-        {%- if mail_events %}
-        #PBS -m {{mail_events}}
+        {%- if mail_event_string %}
+        #PBS -m {{mail_event_string}}
         {%- endif %}
         #PBS -N {{job_name}}
-        {%- if dependency_list %}
-        #PBS -W depend={{dependency_list}}
+        {%- if dependency_string %}
+        #PBS -W depend={{dependency_string}}
         {%- endif %}
         {%- if working_directory %}
         #PBS -d {{working_directory}}
@@ -208,6 +219,9 @@ class PBS(DistributedResourceManager):
         {%- endif %}
         {%- if destination %}
         #PBS -q {{destination}}
+        {%- endif %}
+        {%- if array_controls %}
+        #PBS -t {{array_controls['array_index_min']|default(1)-{{array_controls['array_index_max']|default(1)}}{%- if array_controls['array_concurrent_jobs'] -%}%{{array_controls['array_concurrent_jobs}}{%- endif %-}
         {%- endif %}
         {%- if raw_preamble %}
         {{raw_preamble}}
@@ -235,6 +249,14 @@ class PBS(DistributedResourceManager):
         """
     ).lstrip()
 
+    default_array_command_template = textwrap.dedent(
+        """
+        if [ "$PBS_ARRAYID" = "{{index}}" ]; then
+            {{command}}
+        fi
+        """
+    )
+
     mail_event_map = {
         'BEGIN': 'b',
         'END': 'e',
@@ -251,7 +273,7 @@ class PBS(DistributedResourceManager):
             pass
         return 'pbs_version = ' in output
 
-    def set_dependencies(self, job_data):
+    def set_dependency_string(self, job_data):
         dependencies = job_data.get('dependencies')
         if dependencies:
             dependency_list = []
@@ -267,11 +289,11 @@ class PBS(DistributedResourceManager):
                 array_dependency_list = array_jobs and ('after%sarray:%s' % (state, array_jobs)) or ''
                 regular_dependency_list = regular_jobs and ('after%s:%s' % (state, regular_jobs)) or ''
                 dependency_list.append(','.join(l for l in [array_dependency_list, regular_dependency_list] if l))
-            job_data['dependency_list'] = ','.join(dependency_list)
+            job_data['dependency_string'] = ','.join(dependency_list)
 
-    def set_mail_events(self, job_data):
+    def set_mail_event_string(self, job_data):
         if job_data.get('mail_events'):
-            job_data['mail_events'] = ''.join(
+            job_data['mail_event_string'] = ''.join(
                 sorted(
                     self.mail_event_map[event] for event in job_data['mail_events']
                 )
@@ -321,12 +343,12 @@ class Slurm(DistributedResourceManager):
         {%- if email %}
         #SBATCH --mail-user={{email}}
         {%- endif %}
-        {%- if mail_events %}
-        #SBATCH --mail-type={{mail_events}}
+        {%- if mail_event_string %}
+        #SBATCH --mail-type={{mail_event_string}}
         {%- endif %}
         #SBATCH --job-name={{job_name}}
-        {%- if dependency_list %}
-        #SBATCH --dependency={{dependency_list}}
+        {%- if dependency_string %}
+        #SBATCH --dependency={{dependency_string}}
         {%- endif %}
         {%- if working_directory %}
         #SBATCH --workdir={{working_directory}}
@@ -339,6 +361,9 @@ class Slurm(DistributedResourceManager):
         {%- endif %}
         {%- if destination %}
         #SBATCH --partition={{destination}}
+        {%- endif %}
+        {%- if array_controls %}
+        #SBATCH --array {{array_controls['array_index_min']|default(1)}}-{{array_controls['array_index_max']|default(1)}}{%- if array_controls['array_concurrent_jobs'] -%}%{{array_controls['array_concurrent_jobs']}}{%- endif -%}
         {%- endif %}
         {%- if raw_preamble %}
         {{raw_preamble}}
@@ -366,6 +391,14 @@ class Slurm(DistributedResourceManager):
         """
     ).lstrip()
 
+    default_array_command_template = textwrap.dedent(
+        """
+        if [ "$SLURM_ARRAY_TASK_ID" = "{{index}}" ]; then
+            {{command}}
+        fi
+        """
+    )
+
     mail_event_map = {
         'BEGIN': 'BEGIN',
         'END': 'END',
@@ -381,7 +414,7 @@ class Slurm(DistributedResourceManager):
 
         return 'slurm' in output
 
-    def set_dependencies(self, job_data):
+    def set_dependency_string(self, job_data):
         dependencies = job_data.get('dependencies')
         if dependencies:
             dependency_list = []
@@ -392,11 +425,11 @@ class Slurm(DistributedResourceManager):
                     raise ValueError('Unsupported dependency state: %s' % state)
 
                 dependency_list.append('after%s:%s' % (state, ':'.join(str(job_id) for job_id in job_ids)))
-            job_data['dependency_list'] = ','.join(dependency_list)
+            job_data['dependency_string'] = ','.join(dependency_list)
 
-    def set_mail_events(self, job_data):
+    def set_mail_event_string(self, job_data):
         if job_data.get('mail_events'):
-            job_data['mail_events'] = ','.join(
+            job_data['mail_event_string'] = ','.join(
                 sorted(
                     self.mail_event_map[event] for event in job_data['mail_events']
                 )

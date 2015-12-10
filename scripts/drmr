@@ -30,9 +30,8 @@ HELP = """
 {resource_managers}
 
     drmr will read configuration from your ~/.drmrc, which must be
-    valid JSON.
-
-    You can also specify default values for any job parameters listed below.
+    valid JSON. You can specify your resource manager and default
+    values for any job parameters listed below.
 
     Directives
     ==========
