@@ -58,6 +58,9 @@ class DistributedResourceManager(object):
         """Verifies that the resource manager is installed."""
         raise NotImplementedError
 
+    def make_cancel_script(self, job_data, job_ids):
+        raise NotImplementedError
+
     def make_control_directory(self, job_data):
         """Create the control directory for submitted jobs."""
         self.set_control_directory(job_data)
@@ -83,12 +86,12 @@ class DistributedResourceManager(object):
         template_data = {}
         template_data.update(copy.deepcopy(self.default_job_data))
         template_data.update(job_data)
+        template_data['resource_manager'] = self
 
         self.set_control_directory(template_data)
         self.set_working_directory(template_data)
         self.set_mail_event_string(template_data)
         self.set_job_name(template_data)
-        self.set_dependency_string(template_data)
 
         python_virtualenv = os.getenv('VIRTUAL_ENV')
         if python_virtualenv:
@@ -102,8 +105,8 @@ class DistributedResourceManager(object):
         job_data['control_directory'] = control_path
         return control_path
 
-    def set_dependency_string(self, job_data):
-        """Convert the map of dependency states to job IDs to the string format required by the DRM."""
+    def make_dependency_string(self, state, job_id):
+        """Convert a dependency states and job ID to the dependency string format required by the DRM."""
         raise NotImplementedError
 
     def set_job_name(self, job_data):
@@ -129,18 +132,15 @@ class DistributedResourceManager(object):
             raise ValueError('You did not supply a list of job IDs to wait for.')
 
         common_data = copy.deepcopy(job_data)
-        common_data.update({
-            'walltime': '00:15:00',  # not really, but ARC suggest that it be the minimum for any job
-        })
-        common_data = self.make_job_script_data(common_data)
+        self.set_control_directory(common_data)
 
         #
         # The happy path: all jobs completed; we're done, or on to the
         # next phase. This success job ID is what dependent tasks should
         # watch.
         #
-        success_commands = ['touch {control_directory}/{job_name}.success'.format(**common_data)]
         success_data = copy.deepcopy(common_data)
+        success_commands = ['touch {control_directory}/{job_name}.success'.format(**success_data)]
         success_data.update({
             'job_name': success_data['job_name'] + '.success',
             'dependencies': {'ok': job_list},
@@ -153,9 +153,8 @@ class DistributedResourceManager(object):
         #
         # Whatever happened, let's record that the job is done.
         #
-        finish_commands = ['touch {control_directory}/{job_name}.finished'.format(**common_data)]
-
         finish_data = copy.deepcopy(common_data)
+        finish_commands = ['touch {control_directory}/{job_name}.finished'.format(**finish_data)]
         finish_data.update({
             'job_name': finish_data['job_name'] + '.finish',
             'dependencies': {'any': job_list},
@@ -205,8 +204,8 @@ class PBS(DistributedResourceManager):
         #PBS -m {{mail_event_string}}
         {%- endif %}
         #PBS -N {{job_name}}
-        {%- if dependency_string %}
-        #PBS -W depend={{dependency_string}}
+        {%- if dependencies %}
+        #PBS -W depend={{resource_manager.make_dependency_string(dependencies)}}
         {%- endif %}
         {%- if working_directory %}
         #PBS -d {{working_directory}}
@@ -221,7 +220,7 @@ class PBS(DistributedResourceManager):
         #PBS -q {{destination}}
         {%- endif %}
         {%- if array_controls %}
-        #PBS -t {{array_controls['array_index_min']|default(1)-{{array_controls['array_index_max']|default(1)}}{%- if array_controls['array_concurrent_jobs'] -%}%{{array_controls['array_concurrent_jobs}}{%- endif %-}
+        #PBS -t {{array_controls['array_index_min']|default(1)}}-{{array_controls['array_index_max']|default(1)}}{%- if array_controls['array_concurrent_jobs'] -%}%{{array_controls['array_concurrent_jobs']}}{%- endif -%}
         {%- endif %}
         {%- if raw_preamble %}
         {{raw_preamble}}
@@ -273,8 +272,20 @@ class PBS(DistributedResourceManager):
             pass
         return 'pbs_version = ' in output
 
-    def set_dependency_string(self, job_data):
-        dependencies = job_data.get('dependencies')
+    def write_cancel_script(self, job_data, job_ids):
+        logger = self.get_method_logger()
+        logger.debug('Writing canceller script for {}'.format(job_data))
+
+        self.set_control_directory(job_data)
+        filename = drmr.util.absjoin(job_data['control_directory'], job_data['job_name'])
+        with open(filename, 'w') as canceller:
+            canceller.write('#!/bin/sh\n\n')
+            for job in all_jobs:
+                canceller.write('qdel %s; sleep 0.25\n' % job)
+            os.chmod(filename, 0o755)
+
+    def make_dependency_string(self, dependencies):
+        dependency_string = ''
         if dependencies:
             dependency_list = []
             if not isinstance(dependencies, collections.Mapping):
@@ -289,7 +300,8 @@ class PBS(DistributedResourceManager):
                 array_dependency_list = array_jobs and ('after%sarray:%s' % (state, array_jobs)) or ''
                 regular_dependency_list = regular_jobs and ('after%s:%s' % (state, regular_jobs)) or ''
                 dependency_list.append(','.join(l for l in [array_dependency_list, regular_dependency_list] if l))
-            job_data['dependency_string'] = ','.join(dependency_list)
+            dependency_string = ','.join(dependency_list)
+        return dependency_string
 
     def set_mail_event_string(self, job_data):
         if job_data.get('mail_events'):
@@ -347,15 +359,19 @@ class Slurm(DistributedResourceManager):
         #SBATCH --mail-type={{mail_event_string}}
         {%- endif %}
         #SBATCH --job-name={{job_name}}
-        {%- if dependency_string %}
-        #SBATCH --dependency={{dependency_string}}
+        {%- if dependencies %}
+        #SBATCH --dependency={{resource_manager.make_dependency_string(dependencies)}}
         {%- endif %}
         {%- if working_directory %}
         #SBATCH --workdir={{working_directory}}
         {%- endif %}
         #SBATCH --nodes={{nodes|default(1)}}
-        #SBATCH --ntasks={{processors|default(1)}}
-        #SBATCH --mem-per-cpu={{processor_memory|default('4000m')}}
+        #SBATCH --cpus-per-task={{processors|default(1)}}
+        {% if memory %}
+        #SBATCH --mem={{memory|default('4000')}}
+        {%- else -%}
+        #SBATCH --mem-per-cpu={{processor_memory|default('4000')}}
+        {%- endif %}
         {%- if time_limit %}
         #SBATCH --time={{time_limit}}
         {%- endif %}
@@ -399,6 +415,13 @@ class Slurm(DistributedResourceManager):
         """
     )
 
+    job_state_map = {
+        'any': 'any',
+        'notok': 'notok',
+        'ok': 'ok',
+        'start': '',
+    }
+
     mail_event_map = {
         'BEGIN': 'BEGIN',
         'END': 'END',
@@ -414,8 +437,20 @@ class Slurm(DistributedResourceManager):
 
         return 'slurm' in output
 
-    def set_dependency_string(self, job_data):
-        dependencies = job_data.get('dependencies')
+    def write_cancel_script(self, job_data, job_ids):
+        logger = self.get_method_logger()
+        logger.debug('Writing canceller script for {}'.format(job_data))
+
+        self.set_control_directory(job_data)
+        filename = drmr.util.absjoin(job_data['control_directory'], job_data['job_name'])
+        with open(filename, 'w') as canceller:
+            canceller.write('#!/bin/sh\n\n')
+            for job in job_ids:
+                canceller.write('scancel %s\n' % job)
+            os.chmod(filename, 0o755)
+
+    def make_dependency_string(self, dependencies):
+        dependency_string = ''
         if dependencies:
             dependency_list = []
             if not isinstance(dependencies, collections.Mapping):
@@ -425,7 +460,9 @@ class Slurm(DistributedResourceManager):
                     raise ValueError('Unsupported dependency state: %s' % state)
 
                 dependency_list.append('after%s:%s' % (state, ':'.join(str(job_id) for job_id in job_ids)))
-            job_data['dependency_string'] = ','.join(dependency_list)
+            dependency_string = ','.join(dependency_list)
+
+        return dependency_string
 
     def set_mail_event_string(self, job_data):
         if job_data.get('mail_events'):

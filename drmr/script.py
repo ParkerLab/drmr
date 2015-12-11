@@ -12,17 +12,18 @@ import drmr
 
 # A subset of drmr.JOB_DIRECTIVES, omitting those that don't make sense in a script, and adding 'default'.
 JOB_DIRECTIVES = {
-    "account": "The account to which the job will be billed.",
+    'account': 'The account to which the job will be billed.',
     "default": "Use the resource manager's default job parameters.",
-    "destination": "The execution environment (queue, partition, etc.) for the job.",
-    "mail_events": "A comma-separated list of job events ({}) that will trigger email notifications.".format(drmr.MAIL_EVENTS),
-    "job_name": "A name for the job.",
-    "nodes": "The number of nodes required for the job.",
-    "processors": "The number of cores on each node required for the job.",
-    "processor_memory": "The number of memory required for the job, per processor.",
-    "email": "The submitter's email address, for notifications.",
-    "time_limit": "The maximum amount of time the DRM should allow the job, in HH:MM:SS format.",
-    "working_directory": "The directory where the job should be run.",
+    'destination': 'The execution environment (queue, partition, etc.) for the job.',
+    'mail_events': 'A list of job events ({}) that will trigger email notifications.'.format(drmr.MAIL_EVENTS),
+    'job_name': 'A name for the job.',
+    'memory': 'The amount of memory required on any one node.',
+    'nodes': 'The number of nodes required for the job.',
+    'processors': 'The number of cores required on each node.',
+    'processor_memory': 'The amount of memory required per processor.',
+    'email': """The submitter's email address, for notifications.""",
+    'time_limit': 'The maximum amount of time the DRM should allow the job, in HH:MM:SS format.',
+    'working_directory': 'The directory where the job should be run.',
 }
 
 COMMENT_RE = re.compile('(?P<comment>#.*)$')

@@ -171,6 +171,7 @@ def make_wait_list_note(wait_list):
 
 def create_jobs(resource_manager, template_data, script, wait_list=[], mail_at_finish=False):
     master_job_name = template_data['job_name']
+
     all_jobs = []
     prereqs = wait_list[:]
     job_directives = {}
@@ -188,7 +189,7 @@ def create_jobs(resource_manager, template_data, script, wait_list=[], mail_at_f
             if directive == 'wait' and wait_list:
                 i += 1
                 job_data['notes'] = make_wait_list_note(wait_list)
-                job_id = resource_manager.submit_completion_jobs(job_data, [w[0] for w in wait_list])
+                job_id = resource_manager.submit_completion_jobs(job_data, [job_id for job_id, job_name in wait_list])
                 wait_list = [(job_id, job_name + '.success')]
                 prereqs = wait_list[:]
             elif directive == 'job' and args:
@@ -201,7 +202,7 @@ def create_jobs(resource_manager, template_data, script, wait_list=[], mail_at_f
             job_data.update(job_directives)
             job_data['command'] = line
             if prereqs:
-                job_data['dependencies'] = {'ok': [prereq_id for prereq_id, prereq_name in prereqs]}
+                job_data['dependencies'] = {'ok': [job_id for job_id, job_name in prereqs]}
                 job_data['notes'] = make_wait_list_note(prereqs)
 
             job_file = resource_manager.write_job_file(job_data)
@@ -210,8 +211,13 @@ def create_jobs(resource_manager, template_data, script, wait_list=[], mail_at_f
             all_jobs.append(job_id)
 
     completion_data = copy.deepcopy(template_data)
+    completion_data['job_name'] = master_job_name
     completion_data['notes'] = make_wait_list_note(wait_list)
     completion_job_id = resource_manager.submit_completion_jobs(completion_data, [w[0] for w in wait_list], mail_at_finish=mail_at_finish)
+
+    cancel_data = copy.deepcopy(template_data)
+    cancel_data['job_name'] = master_job_name + '.cancel'
+    resource_manager.write_cancel_script(cancel_data, all_jobs + [completion_job_id])
 
     return all_jobs, completion_job_id
 
