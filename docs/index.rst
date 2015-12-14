@@ -1,5 +1,5 @@
-drmr: a toolkit for ATAC-seq data
-===================================
+drmr: Simple pipeline management for distributed resource managers.
+===================================================================
 
 .. toctree::
     :maxdepth: 4

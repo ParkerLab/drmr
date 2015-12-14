@@ -212,7 +212,11 @@ class PBS(DistributedResourceManager):
         {%- endif %}
         #PBS -l nodes={{nodes|default(1)}}
         #PBS -l procs={{processors|default(1)}}
+        {%- if memory %}
+        #PBS --mem={{memory|default('4000')}}
+        {%- else -%}
         #PBS -l pmem={{processor_memory|default('4000m')}}
+        {%- endif %}
         {%- if time_limit %}
         #PBS -l walltime={{time_limit}}
         {%- endif %}
@@ -367,7 +371,7 @@ class Slurm(DistributedResourceManager):
         {%- endif %}
         #SBATCH --nodes={{nodes|default(1)}}
         #SBATCH --cpus-per-task={{processors|default(1)}}
-        {% if memory %}
+        {%- if memory %}
         #SBATCH --mem={{memory|default('4000')}}
         {%- else -%}
         #SBATCH --mem-per-cpu={{processor_memory|default('4000')}}

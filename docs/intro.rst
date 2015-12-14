@@ -3,29 +3,31 @@ Introduction
 ============
 
 
+Drmr (pronounced 'drummer') lets you write computational pipelines in
+simple shell scripts. It's designed to work with common distributed
+resource management (DRM) systems (Slurm and PBS so far).
+
 What's in the box?
 ------------------
 
-Programs we've found useful in ATAC-seq pipelines
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+* drmr
 
-* ``trim_adapters``: based on Jason Buenrostro's utility for trimming
-  Illumina adapters by aligning paired reads to each other.
-* ``make_cut_matrix``: useful in conjunction with CENTIPEDE, and in
-  generating plots of transcription factor binding sites.
-* ``plot_aggregate_matrix.R``: generates plots for motifs given the
-  aggregate output of `make_cut_matrix`
+    The most capable way of submitting jobs, drmr scripts can specify
+    job parameters for each command, and also express dependencies,
+    where the pipeline should wait for previous jobs to complete
+    before continuing.
 
-A Python library you can use in your own tools for processing ATAC-seq data
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+* drmrarray
 
-The code underpinning our command-line tools has allowed us to make
-our pipelines shorter and faster. Our ATAC-seq scoring functions work
-directly with a BAM file and run in parallel, without the overhead of
-invoking external applications. Particularly if you're trying to
-produce quantitative metrics from your data, starting with your BAM
-files, converting them to BED and bigWig so you can run bigWigSummary,
-you might find your pipeline can be simplified too.
+    For simple scripts whose every command can run concurrently with
+    the same job parameters. If commands have different requirements,
+    use drmr.
+
+* drmr_configure
+
+    A tool to generate the drmr configuration file, ``.drmrc``. It
+    will try to detect your DRM automatically. You can also specify
+    default accounts and destinations for running jobs.
 
 License
 -------

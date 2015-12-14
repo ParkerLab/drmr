@@ -2,208 +2,271 @@
 Usage
 ========
 
-Command-line applications
-=========================
+drmr
+====
 
-Adapter trimming
-----------------
+Submits a pipeline script to a distributed resource manager. By
+default all the pipeline's commands are run concurrently, but you can
+indicate dependencies by adding ``# drmr:wait`` directives between
+jobs. Whenever a wait directive is encountered, the pipeline will wait
+for all prior jobs to complete before continuing.
 
-The trim_adapters utility is based on a script by Jason Buenrostro
-(see `the original ATAC-seq paper`_: Buenrostro, Jason D; Giresi, Paul
-G; Zaba, Lisa C; Chang, Howard Y; Greenleaf,
-William J. 2013. *Transposition of native chromatin for fast and
-sensitive epigenomic profiling of open chromatin, DNA-binding proteins
-and nucleosome position*. Nat Meth 10, 1213–1218.)
+You may also specify job parameters, like CPU or memory requirements,
+time limits, etc. in ``# drmr:job`` directives.
 
-Instead of looking for known adapter sequence, it aligns paired reads
-to each other and trims off sequence outside the alignment. More
-precisely, it searches the forward read for the reverse complement of
-a specified number of bases (20 by default) at the beginning of the
-reverse read, then falls back to finding the best alignment of the two
-reads, using the minimum Levenshtein distance between them.
+You can get help, including a full example, by running ``drmr --help``::
 
-Changes from the original script:
+    usage: drmr [-h] [-a ACCOUNT] [-d DESTINATION] [--debug] -j JOB_NAME [-m]
+                [-w WAIT_LIST]
+                input
 
-* The ``--max-edit-distance`` option to specify the maximum edit distance
-  when aligning the reads.
-* The ``--fudge`` option to not trim a base from the result to satisfy
-  bowtie -- other aligners like bwa don't have the apparent problem
-  with exactly overlapping reads. The default is 1 for compatibility
-  with the original script.
-* The ``--rc-length`` option to specify the amount of the reverse read to
-  reverse complement and search for in the forward read.
-* The ``--trim-from-start`` option to remove extra bases from the
-  beginning of each read. We found this necessary with OH-seq.
-* Output is gzipped.
+    Submit a drmr script to a distributed resource manager.
 
-Cut matrix generation
----------------------
+    positional arguments:
+      input                 The file containing commands to submit. Use "-" for
+                            stdin.
 
-The ``make_cut_matrix`` script can be used to generate two types of
-matrices by counting the ATAC-seq cut points (transposition sites)
-around known motifs, given a BAM file of aligned reads from an
-ATAC-seq experiment and a BED file of motifs.
+    optional arguments:
+      -h, --help            show this help message and exit
+      -a ACCOUNT, --account ACCOUNT
+                            The account to be billed for the jobs.
+      -d DESTINATION, --destination DESTINATION
+                            The queue/partition in which to run the jobs.
+      --debug               Turn on debug-level logging.
+      -j JOB_NAME, --job-name JOB_NAME
+                            The job name.
+      -m, --mail-at-finish  If specified, mail will be sent when all jobs are
+                            finished.
+      -w WAIT_LIST, --wait-list WAIT_LIST
+                            A colon-separated list of job IDs that must complete
+                            before any of this script's jobs are started.
 
-Discrete matrices
-^^^^^^^^^^^^^^^^^
+    Supported resource managers are:
 
-The first type of output, which we call `discrete`, is intended to
-produce input for CENTIPEDE. The output matrix contains a row for each
-motif, representing the cut point counts at positions within and
-around the motif for each fragment size bin. For each fragment size
-bin and resolution you specify, the cut points at each position in the
-motif and an extended region you specify are counted, and every
-`resolution` positions in the extended area on either side of the
-motif are summed. So each row will contain for each fragment size bin
-a sequence of (possibly aggregated) scores in the region upstream of
-the motif, a sequence of scores for each position in the motif, and a
-sequence of (possibly aggregated) scores in the region downstream of
-the motif.
+      Slurm
+      PBS
 
-An example invocation::
+    drmr will read configuration from your ~/.drmrc, which must be
+    valid JSON. You can specify your resource manager and default
+    values for any job parameters listed below.
 
-  make_cut_matrix -d -b '(36-149 150-324 325-400 1)' -p 8 \
-    input.bam \
-    JASPAR2014_CTCF.bed.gz | \
-    gzip -c > CTCF.discrete.matrix.gz
+    Directives
+    ==========
 
-That would count any reads with lengths between 36-149, 150-324, and
-325-400 from ``input.bam`` whose cut points fell in the specified
-region around motifs from ``JASPAR2014_CTCF.bed.gz``. The cut point
-counts would be recorded for each fragment size bin, at nucleotide
-resolution (with no score aggregation in the extended region around
-each motif). Since the length of the extended region was not
-specified, it would use the default. The program would use eight
-concurrent scoring processes, and the output would wind up in
-CTCF.discrete.matrix.gz.
+    Your script can specify job control directives in special
+    comments starting with "drmr:".
 
-Aggregate matrices
-^^^^^^^^^^^^^^^^^^
+    # drmr:wait
 
-After you've run CENTIPEDE with the resulting `discrete` matrix, and
-identified bound and unbound motifs (perhaps using posterior
-probabilities of at least 0.95 or at most 0.5, respectively), you can
-move on to generating what we call `aggregate` matrices.  These are
-designed for creating a plot of the ATAC-seq signal around a single
-motif.
+      Drmr by default runs all the script's commands
+      concurrently. The wait directive tells drmr to wait for
+      any jobs started since the last wait directive, or the
+      beginning of the script, to complete successfully.
 
-An `aggregate` matrix contains a row for each combination of position,
-fragment size bin, and strand within and around the motif, with
-columns representing the absolute and average cut point counts at each
-position.
+    # drmr:job
 
-An example invocation, using a BED file of bound motifs::
+      You can customize the following job parameters:
 
-  make_cut_matrix -a -b '(36-149 150-324 325-400 1)' -p 8 \
-    input.bam \
-    CTCF_bound.bed.gz | \
-    gzip -c > CTCF_bound.aggregate.matrix.gz
+      time_limit: The maximum amount of time the DRM should allow the job, in HH:MM:SS format.
+      working_directory: The directory where the job should be run.
+      processor_memory: The amount of memory required per processor.
+      account: The account to which the job will be billed.
+      processors: The number of cores required on each node.
+      default: Use the resource manager's default job parameters.
+      destination: The execution environment (queue, partition, etc.) for the job.
+      email: The submitter's email address, for notifications.
+      memory: The amount of memory required on any one node.
+      mail_events: A list of job events (['BEGIN', 'END', 'FAIL']) that will trigger email notifications.
+      nodes: The number of nodes required for the job.
+      job_name: A name for the job.
 
-Do the same for your unbound motifs, and you're ready to plot.
+      Whatever you specify will apply to all jobs after the directive.
 
-Binning
-^^^^^^^
+      To revert to default parameters, use:
 
-For either matrix, we count cut points in groups of bins according to
-the length of the reads' fragments, with optional reduction of scores
-in regions around motifs to a resolution you specify for each
-group. This is regrettably complex to explain, so I will resort to
-crude pictures.
+      # drmr:job default
 
-Assume you want to count cut points from fragments with lengths in the
-following ranges at different resolutions:
+      To request 4 CPUs, 8GB of memory per processor, and a
+      limit of 12 hours of execution time on one node:
 
-====================  ==========
-Fragment bin group    Resolution
-====================  ==========
-36-149                1
-150-224 and 225-324   2
-325-400               5
-====================  ==========
+      # drmr:job nodes=1 processors=4 processor_memory=8000 time_limit=12:00:00
 
-The command line specification for this scenario would look like
-this::
+    Example
+    =======
 
-  make_cut_matrix -a -b '(36-149 1) (150-224 225-324 2) (325-400 5)' ...
+    A complete example script follows:
 
-Pretend you're scoring a motif 5 bases long, with a 10-base extended
-region on either side, and for simplicity, pretend that each template
-length bin had the same counts of cut points around the motif, shown
-here::
+    #!/bin/bash
 
-  extended region     motif     extended region
-  ------------------- --------- -------------------
-  0 1 2 3 3 4 4 4 4 5 9 2 0 2 7 5 4 4 4 4 3 3 2 1 0
+    #
+    # Example drmr script. It can be run as a normal shell script, or
+    # submitted to a resource manager with the drmr command.
+    #
 
-The matrix would contain scores for each position in the first bin
-group, ``(36-149 1)``::
+    #
+    # You can just write commands as you would in any script. Their output
+    # will be captured in files by the resource manager.
+    #
+    echo thing1
 
-  extended region     motif     extended region
-  ------------------- --------- -------------------
-  0 1 2 3 3 4 4 4 4 5 9 2 0 2 7 5 4 4 4 4 3 3 2 1 0
+    #
+    # You can only use flow control within a command; drmr's parser is not
+    # smart enough to deal with conditionals, or create jobs for each
+    # iteration of a for loop, or anything like that.
+    #
+    # You can do this, but it will just all happen in a single job:
+    #
+    for i in $(seq 1 4); do echo thing${i}; done
 
-The second bin group, ``(150-224 225-324 2)`` would contain sums of
-every two scores in the extended region, plus every score in the motif
-itself::
+    #
+    # Comments are OK.
+    #
+    echo thing2  # even trailing comments
 
-  extended region                 motif     extended region
-  ------------------------------- --------- ------------------------------
-  (0+1) (2+3) (3+4) (4+4) (4 + 5) 9 2 0 2 7 (5+4) (4+4) (4+3) (3+2) (1+ 0)
+    #
+    # Line continuations are OK.
+    #
+    echo thing1 \
+         thing2 \
+         thing3
 
-resulting in::
+    #
+    # Pipes are OK.
+    #
+    echo funicular berry harvester | wc -w
 
-  e.r.      motif     e.r.
-  --------- --------- ---------
-  1 5 7 8 9 9 2 0 2 7 9 8 7 5 1
+    #
+    # The drmr wait directive makes subsequent tasks depend on the
+    # successful completion of all jobs since the last wait directive or
+    # the start of the script.
+    #
 
-Furthermore, since this group contains two bins, what ultimately goes
-into the output matrix would be the entrywise sum of each bin's scores.
+    # drmr:wait
+    echo "And proud we are of all of them."
 
-The scores for the last bin group, ``(325-400 5)``, after adding every
-five scores in the extended region::
+    #
+    # You can specify job parameters:
+    #
 
-    e.r. motif     e.r.
-    ---- --------- ----
-    9 21 9 2 0 2 7 21 9
+    # drmr:job nodes=1 processors=4 processor_memory=8000 time_limit=12:00:00
+    echo "I got mine but I want more."
+
+    #
+    # And revert to the defaults defined by drmr or the resource manager.
+    #
+
+    # drmr:job default
+    echo "This job feels so normal."
+
+    # drmr:wait
+    # drmr:job time_limit=00:15:00
+    echo "All done!"
+
+    # And finally, a job is automatically submitted to wait on all the
+    # other jobs and report success or failure of the entire script.
+    # Its job ID will be printed.
+
+drmrarray
+=========
+
+Submits an entire script in a job array. The script cannot contain
+dependencies. Job parameters can only be specified at the top of the
+script, and will apply to all jobs in the array.
+
+You can get help, including a full example, by running `drmrarray --help`::
+
+    usage: drmrarray [-h] [-a ACCOUNT] [-d DESTINATION] [--debug] [-f] -j JOB_NAME
+                     [-m] [-w WAIT_LIST]
+                     input
+
+    Submit a drmr script to a distributed resource manager as a job array.
+
+    positional arguments:
+      input                 The file containing commands to submit. Use "-" for
+                            stdin.
+
+    optional arguments:
+      -h, --help            show this help message and exit
+      -a ACCOUNT, --account ACCOUNT
+                            The account to be billed for the jobs.
+      -d DESTINATION, --destination DESTINATION
+                            The queue/partition in which to run the jobs.
+      --debug               Turn on debug-level logging.
+      -f, --finish-jobs     If specified, two extra jobs will be queued after the
+                            main array, to indicate success and completion.
+      -j JOB_NAME, --job-name JOB_NAME
+                            The job name.
+      -m, --mail-at-finish  If specified, mail will be sent when all jobs are
+                            finished.
+      -w WAIT_LIST, --wait-list WAIT_LIST
+                            A colon-separated list of job IDs that must complete
+                            before any of this script's jobs are started.
+
+    Supported resource managers are:
+
+      Slurm
+      PBS
+
+    drmr will read configuration from your ~/.drmrc, which must be
+    valid JSON. You can specify your resource manager and default
+    values for any job parameters listed below.
+
+    Directives
+    ==========
+
+    Your script can specify job parameters in special comments starting
+    with "drmr:job".
+
+    # drmr:job
+
+      You can customize the following job parameters:
+
+      time_limit: The maximum amount of time the DRM should allow the job, in HH:MM:SS format.
+      working_directory: The directory where the job should be run.
+      processor_memory: The amount of memory required per processor.
+      account: The account to which the job will be billed.
+      processors: The number of cores required on each node.
+      default: Use the resource manager's default job parameters.
+      destination: The execution environment (queue, partition, etc.) for the job.
+      email: The submitter's email address, for notifications.
+      memory: The amount of memory required on any one node.
+      mail_events: A list of job events (['BEGIN', 'END', 'FAIL']) that will trigger email notifications.
+      nodes: The number of nodes required for the job.
+      job_name: A name for the job.
+
+      Whatever you specify will apply to all jobs after the directive.
+
+      To revert to default parameters, use:
+
+      # drmr:job default
+
+      To request 4 CPUs, 8GB of memory per processor, and a
+      limit of 12 hours of execution time on one node:
+
+      # drmr:job nodes=1 processors=4 processor_memory=8000 time_limit=12:00:00
 
 
-Creating ATAC-seq signal plots for motifs
------------------------------------------
+drmr_configure
+==============
 
-The output of ``make_cut_matrix --aggregate-output`` can be plotted
-with ``plot_aggregate_matrix.R``. Pass it the aggregate output for a
-bound motif, the aggregate output for an unbound motif, a title for
-the plot and the name of the PDF file in which to save the plot.
+Creates the drmr configuration file, `.drmrc`. It will try to detect
+the DRM in use on your system, but you can specify it explicitly, as
+well as a default account or destination for your jobs.
 
-An example of the output produced by::
+usage: drmr_configure [-h] [-a ACCOUNT] [-d DESTINATION] [-o]
+                      [-r RESOURCE_MANAGER]
 
-  plot_aggregate_matrix.R CTCF_bound.aggregate.matrix CTCF_unbound.aggregate.matrix "CTCF regions with motifs oriented by strand" CTCF.pdf
+Generate a drmr configuration file for your local environment.
 
-.. image:: _static/img/CTCF.png
+Help is available by running `drmr_configure --help`::
 
-Using the ``drmr`` library
-============================
-
-There are several modules in the ``drmr`` package that you might
-find useful in processing ATAC-seq data, particularly ``drmr.data``
-and ``drmr.metrics``.
-
-The ``drmr.data`` module simplifies reading and manipulating
-features from BED files. It handles gzipped or uncompressed files
-automatically, and makes it simple to filter aligned segments from a
-BAM file using standard SAM flags. It also makes it easy to read two
-FASTQ files simultaneously, producing a sequence of paired reads.
-
-The ``drmr.metrics`` module makes it easy to measure ATAC-seq cut
-points around a feature.
-
-There are also the ``drmr.command`` and ``drmr.util`` modules,
-which support parsing of our interval specifications and provide some
-generic functional tools used in the other modules.
-
-We've made an effort to ensure the library is completely documented
-(see the :ref:`modindex`). If you find the documentation incomplete or
-unclear, please file a bug report.
-
-
-.. _the original ATAC-seq paper: http://dx.doi.org/10.1038/nmeth.2688
+    optional arguments:
+      -h, --help            show this help message and exit
+      -a ACCOUNT, --account ACCOUNT
+                            The account to which jobs will be charged by default.
+      -d DESTINATION, --destination DESTINATION
+                            The default queue/partition in which to run jobs.
+      -o, --overwrite       Overwrite any existing configuration file.
+      -r RESOURCE_MANAGER, --resource-manager RESOURCE_MANAGER
+                            If you have more than one resource manager available,
+                            you can specify it.
