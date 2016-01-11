@@ -16,10 +16,12 @@ import logging
 import os
 import re
 import subprocess
+import time
 import uuid
 import textwrap
 
 import jinja2
+import lxml.objectify
 
 import drmr
 import drmr.util
@@ -45,8 +47,23 @@ class DistributedResourceManager(object):
     def capture_process_output(self, command=[]):
         return subprocess.check_output(command, stderr=subprocess.STDOUT, universal_newlines=True)
 
-    def validate_destination(self, destination):
-        """Verifies that the given destination is valid."""
+    def delete_jobs(self, job_ids=[], job_name=None, job_owner=None, dry_run=False):
+        raise NotImplementedError
+
+    def explain_job_deletion(self, job_ids=[], job_name=None, job_owner=None, dry_run=False):
+        msg = (dry_run and 'Would delete ' or 'Deleting ') + 'jobs belonging to ' + job_owner
+        if job_ids:
+            msg += ' whose IDs are in this list: {}'.format(job_ids)
+        if job_name:
+            if job_ids:
+                msg += ' or'
+            msg += ' whose names match "' + job_name + '"'
+        return msg
+
+    def get_active_job_ids(self, job_name=None, job_owner=None):
+        """
+        Get a list of ids of jobs that are running, or might be in the future.
+        """
         raise NotImplementedError
 
     def get_method_logger(self):
@@ -78,7 +95,7 @@ class DistributedResourceManager(object):
     def make_job_script(self, job_data):
         """Format a job template, suitable for submission to the DRM."""
         template_data = self.make_job_script_data(job_data)
-        template_environment = jinja2.Environment()
+        template_environment = jinja2.Environment(trim_blocks=True, lstrip_blocks=True)
         return template_environment.from_string(self.default_job_template).render(**template_data)
 
     def make_job_script_data(self, job_data):
@@ -169,6 +186,10 @@ class DistributedResourceManager(object):
 
         return success_job_id
 
+    def validate_destination(self, destination):
+        """Verifies that the given destination is valid."""
+        raise NotImplementedError
+
     def write_job_file(self, job_data):
         """Write a batch script to be submitted to the resource manager."""
 
@@ -194,55 +215,61 @@ class PBS(DistributedResourceManager):
         #PBS -V
         #PBS -j oe
         #PBS -o {{control_directory}}
-        {%- if account %}
+        {% if account %}
+        # account={{account}}
         #PBS -A {{account}}
-        {%- endif %}
-        {%- if email %}
+        {% endif %}
+        {% if email %}
+        # email={{email}}
         #PBS -M {{email}}
-        {%- endif %}
-        {%- if mail_event_string %}
+        {% endif %}
+        {% if mail_event_string %}
         #PBS -m {{mail_event_string}}
-        {%- endif %}
+        {% endif %}
         #PBS -N {{job_name}}
-        {%- if dependencies %}
+        {% if dependencies %}
         #PBS -W depend={{resource_manager.make_dependency_string(dependencies)}}
-        {%- endif %}
-        {%- if working_directory %}
+        {% endif %}
+        {% if working_directory %}
         #PBS -d {{working_directory}}
-        {%- endif %}
-        #PBS -l nodes={{nodes|default(1)}}
-        #PBS -l procs={{processors|default(1)}}
-        {%- if memory %}
-        #PBS --mem={{memory|default('4000')}}
-        {%- else -%}
-        #PBS -l pmem={{processor_memory|default('4000m')}}
-        {%- endif %}
-        {%- if time_limit %}
+        {% endif %}
+        {% if nodes %}
+        #PBS -l nodes={{nodes}}:ppn={{processors|default(1)}}
+        {% else %}
+        #PBS -l ncpus={{processors|default(1)}}
+        {% endif %}
+        {% if memory %}
+        #PBS -l mem={{memory|default('4000')}}mb
+        {% else %}
+        #PBS -l pmem={{processor_memory|default('4000')}}mb
+        {% endif %}
+        {% if time_limit %}
         #PBS -l walltime={{time_limit}}
-        {%- endif %}
-        {%- if destination %}
+        {% endif %}
+        {% if destination %}
         #PBS -q {{destination}}
-        {%- endif %}
-        {%- if array_controls %}
-        #PBS -t {{array_controls['array_index_min']|default(1)}}-{{array_controls['array_index_max']|default(1)}}{%- if array_controls['array_concurrent_jobs'] -%}%{{array_controls['array_concurrent_jobs']}}{%- endif -%}
-        {%- endif %}
-        {%- if raw_preamble %}
+        {% endif %}
+        {% if array_controls %}
+        #PBS -t {{array_controls['array_index_min']|default(1)}}-{{array_controls['array_index_max']|default(1)}}{% if array_controls['array_concurrent_jobs'] %}%{{array_controls['array_concurrent_jobs']}}{% endif %}
+        {% endif %}
+        {% if raw_preamble %}
         {{raw_preamble}}
-        {%- endif %}
+        {% endif %}
+
 
         ####  End PBS preamble
 
-        {% if notes -%}
+        {% if notes %}
         ####  Notes
         {{notes}}
-        {%- endif %}
+        {% endif %}
 
-        {% if environment_setup -%}
+        {% if environment_setup %}
         ####  Environment setup
         {% for line in environment_setup %}
         {{line}}
-        {%- endfor %}
-        {%- endif %}
+        {% endfor %}
+        {% endif %}
 
         ####  Commands
 
@@ -268,6 +295,47 @@ class PBS(DistributedResourceManager):
 
     array_job_id_re = re.compile('^\S+\[.*\]')
 
+    def delete_jobs(self, job_ids=[], job_name=None, job_owner=None, dry_run=False):
+        logger = self.get_method_logger()
+
+        targets = set(job_ids)
+        targets.update(self.get_active_job_ids(job_ids, job_name, job_owner))
+
+        if targets:
+            if dry_run:
+                logger.info(self.explain_job_deletion(job_ids, job_name, job_owner, dry_run))
+            else:
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(self.explain_job_deletion(job_ids, job_name, job_owner, dry_run))
+                for target in targets:
+                    command = ['qdel', target]
+                    subprocess.check_call(command)
+                    time.sleep(0.25)  # PBS is frail
+
+    def get_active_job_ids(self, job_ids=[], job_name=None, job_owner=None):
+        jobs = set([])
+
+        command = ['qstat', '-t', '-x']
+
+        qstat = lxml.objectify.fromstring(self.capture_process_output(command))
+        for job in qstat.findall('Job'):
+            if job.job_state not in ['E', 'H', 'Q', 'R', 'T', 'W']:
+                continue
+
+            if job_name and job_name not in job.Job_Name.text:
+                continue
+
+            if job_ids and job.Job_Id.text not in job_ids:
+                continue
+
+            owner = job.Job_Owner.text.split('@')[0]
+            if job_owner and job_owner != owner:
+                continue
+
+            jobs.add(job.Job_Id.text)
+
+        return jobs
+
     def is_installed(self):
         output = ''
         try:
@@ -284,8 +352,8 @@ class PBS(DistributedResourceManager):
         filename = drmr.util.absjoin(job_data['control_directory'], job_data['job_name'])
         with open(filename, 'w') as canceller:
             canceller.write('#!/bin/sh\n\n')
-            for job in all_jobs:
-                canceller.write('qdel %s; sleep 0.25\n' % job)
+            for job_id in job_ids:
+                canceller.write('qdel %s; sleep 0.25\n' % job_id)
             os.chmod(filename, 0o755)
 
     def make_dependency_string(self, dependencies):
@@ -352,56 +420,63 @@ class Slurm(DistributedResourceManager):
         ####  Slurm preamble
 
         #SBATCH --export=ALL
-        #SBATCH --output "{{control_directory}}/{{job_name}}_%j.out"
-        {%- if account %}
-        #SBATCH --account={{account}}
-        {%- endif %}
-        {%- if email %}
-        #SBATCH --mail-user={{email}}
-        {%- endif %}
-        {%- if mail_event_string %}
-        #SBATCH --mail-type={{mail_event_string}}
-        {%- endif %}
         #SBATCH --job-name={{job_name}}
-        {%- if dependencies %}
-        #SBATCH --dependency={{resource_manager.make_dependency_string(dependencies)}}
-        {%- endif %}
-        {%- if working_directory %}
-        #SBATCH --workdir={{working_directory}}
-        {%- endif %}
-        #SBATCH --nodes={{nodes|default(1)}}
+        {% if nodes %}
+        #SBATCH --nodes={{nodes}}
+        {% endif %}
         #SBATCH --cpus-per-task={{processors|default(1)}}
-        {%- if memory %}
+        {% if memory %}
         #SBATCH --mem={{memory|default('4000')}}
-        {%- else -%}
+        {% else %}
         #SBATCH --mem-per-cpu={{processor_memory|default('4000')}}
-        {%- endif %}
-        {%- if time_limit %}
+        {% endif %}
+        {% if time_limit %}
         #SBATCH --time={{time_limit}}
-        {%- endif %}
-        {%- if destination %}
+        {% endif %}
+        {% if array_controls %}
+        #SBATCH --output "{{control_directory}}/{{job_name}}_%A_%a_%j.out"
+        {% else %}
+        #SBATCH --output "{{control_directory}}/{{job_name}}_%j.out"
+        {% endif %}
+        {% if account %}
+        #SBATCH --account={{account}}
+        {% endif %}
+        {% if destination %}
         #SBATCH --partition={{destination}}
-        {%- endif %}
-        {%- if array_controls %}
-        #SBATCH --array {{array_controls['array_index_min']|default(1)}}-{{array_controls['array_index_max']|default(1)}}{%- if array_controls['array_concurrent_jobs'] -%}%{{array_controls['array_concurrent_jobs']}}{%- endif -%}
-        {%- endif %}
-        {%- if raw_preamble %}
+        {% endif %}
+        {% if email %}
+        #SBATCH --mail-user={{email}}
+        {% endif %}
+        {% if mail_event_string %}
+        #SBATCH --mail-type={{mail_event_string}}
+        {% endif %}
+        {% if dependencies %}
+        #SBATCH --dependency={{resource_manager.make_dependency_string(dependencies)}}
+        {% endif %}
+        {% if working_directory %}
+        #SBATCH --workdir={{working_directory}}
+        {% endif %}
+        {% if array_controls %}
+        #SBATCH --array {{array_controls['array_index_min']|default(1)}}-{{array_controls['array_index_max']|default(1)}}{% if array_controls['array_concurrent_jobs'] %}%{{array_controls['array_concurrent_jobs']}}{% endif %}
+        {% endif %}
+        {% if raw_preamble %}
         {{raw_preamble}}
-        {%- endif %}
+        {% endif %}
+
 
         ####  End Slurm preamble
 
-        {% if notes -%}
+        {% if notes %}
         ####  Notes
         {{notes}}
-        {%- endif %}
+        {% endif %}
 
-        {% if environment_setup -%}
+        {% if environment_setup %}
         ####  Environment setup
         {% for line in environment_setup %}
         {{line}}
-        {%- endfor %}
-        {%- endif %}
+        {% endfor %}
+        {% endif %}
 
         ####  Commands
 
@@ -431,6 +506,49 @@ class Slurm(DistributedResourceManager):
         'END': 'END',
         'FAIL': 'FAIL',
     }
+
+    def delete_jobs(self, job_ids=[], job_name=None, job_owner=None, dry_run=False):
+        logger = self.get_method_logger()
+
+        targets = set(job_ids)
+        targets.update(self.get_active_job_ids(job_ids, job_name, job_owner))
+
+        if targets:
+            if dry_run:
+                logger.info(self.explain_job_deletion(job_ids, job_name, job_owner, dry_run))
+            else:
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(self.explain_job_deletion(job_ids, job_name, job_owner, dry_run))
+                command = ['scancel'] + list(targets)
+                subprocess.check_call(command)
+
+    def get_active_job_ids(self, job_ids=[], job_name=None, job_owner=None):
+        jobs = set([])
+
+        command = [
+            'squeue',
+            '-r',
+            '--format=%A,%j,%u',
+            '--states=CONFIGURING,COMPLETING,PENDING,PREEMPTED,RUNNING,SUSPENDED'
+        ]
+
+        squeue_lines = self.capture_process_output(command).splitlines()
+        if 1 < len(squeue_lines):
+            squeue_lines = set(squeue_lines[1:])
+            for job in squeue_lines:
+                job_id, name, owner = job.split(',')
+                if job_owner and owner != job_owner:
+                    continue
+
+                if job_name and job_name != name:
+                    continue
+
+                if job_ids and job_id not in job_ids:
+                    continue
+
+                jobs.add(job_id)
+
+        return jobs
 
     def is_installed(self):
         output = ''

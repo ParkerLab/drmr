@@ -144,6 +144,7 @@ HELP = """
     'resource_managers': '\n'.join('      {}'.format(name) for name in drmr.RESOURCE_MANAGERS.keys()),
 })
 
+
 def parse_arguments():
     parser = argparse.ArgumentParser(
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -189,7 +190,7 @@ def create_jobs(resource_manager, template_data, script, wait_list=[], mail_at_f
             if directive == 'wait' and wait_list:
                 i += 1
                 job_data['notes'] = make_wait_list_note(wait_list)
-                job_id = resource_manager.submit_completion_jobs(job_data, [job_id for job_id, job_name in wait_list])
+                job_id = resource_manager.submit_completion_jobs(job_data, [wait_id for wait_id, wait_name in wait_list])
                 wait_list = [(job_id, job_name + '.success')]
                 prereqs = wait_list[:]
             elif directive == 'job' and args:
@@ -202,7 +203,7 @@ def create_jobs(resource_manager, template_data, script, wait_list=[], mail_at_f
             job_data.update(job_directives)
             job_data['command'] = line
             if prereqs:
-                job_data['dependencies'] = {'ok': [job_id for job_id, job_name in prereqs]}
+                job_data['dependencies'] = {'ok': [wait_id for wait_id, wait_name in prereqs]}
                 job_data['notes'] = make_wait_list_note(prereqs)
 
             job_file = resource_manager.write_job_file(job_data)
@@ -247,6 +248,10 @@ if __name__ == '__main__':
         'job_name': args.job_name,
         'working_directory': os.path.abspath(os.getcwd()),
     }
+
+    if args.input != '-' and not os.access(args.input, os.R_OK):
+        print('Cannot read script file "{}"'.format(args.input), file=sys.stderr)
+        sys.exit(1)
 
     input_file = args.input == '-' and sys.stdin or open(args.input)
     script = drmr.script.parse_script(input_file.read())

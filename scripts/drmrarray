@@ -29,9 +29,9 @@ HELP = """
 
 {resource_managers}
 
-    drmr will read configuration from your ~/.drmrc, which must be
-    valid JSON. You can specify your resource manager and default
-    values for any job parameters listed below.
+    drmrarray will read configuration from your ~/.drmrc, which must be valid
+    JSON. You can specify your resource manager and default values for any job
+    parameters listed below.
 
     Directives
     ==========
@@ -146,6 +146,10 @@ if __name__ == '__main__':
         'job_name': args.job_name,
         'working_directory': os.path.abspath(os.getcwd()),
     }
+
+    if args.input != '-' and not os.access(args.input, os.R_OK):
+        print('Cannot read script file "{}"'.format(args.input), file=sys.stderr)
+        sys.exit(1)
 
     input_file = args.input == '-' and sys.stdin or open(args.input)
     script = [line for line in drmr.script.parse_script(input_file.read()) if not drmr.script.is_boring(line)]

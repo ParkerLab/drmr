@@ -18,7 +18,7 @@ test_requirements = []
 
 setup(
     name='drmr',
-    version='0.1.0',
+    version='0.1.1',
     description="A tool for submitting pipeline scripts to distributed resource managers.",
     long_description=readme + '\n\n',
     author="The Parker Lab",
@@ -27,8 +27,9 @@ setup(
     packages=['drmr', 'drmr.drm'],
     scripts=[
         'scripts/drmr',
-        'scripts/drmrarray',
         'scripts/drmr_configure',
+        'scripts/drmrarray',
+        'scripts/drmrm',
     ],
     include_package_data=True,
     install_requires=requirements,
