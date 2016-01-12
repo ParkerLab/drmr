@@ -130,15 +130,10 @@ if __name__ == '__main__':
 
     try:
         config = drmr.load_configuration({'account': args.account, 'destination': args.destination})
+        resource_manager = drmr.get_resource_manager(config['resource_manager'])
     except drmr.ConfigurationError as e:
         print(e, file=sys.stderr)
         sys.exit(1)
-
-    if 'resource_manager' not in config:
-        print('Please specify your resource manager in your drmr configuration file.', file=sys.stderr)
-        sys.exit(1)
-
-    resource_manager = drmr.get_resource_manager(config['resource_manager'])
 
     template_data = {
         'account': config['account'],

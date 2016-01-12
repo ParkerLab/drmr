@@ -28,8 +28,8 @@ JOB_DIRECTIVES = {
 
 COMMENT_RE = re.compile('(?P<comment>#.*)$')
 CONTINUATION_RE = re.compile('\\\s*$')
-DIRECTIVES = ['job', 'wait']
-DIRECTIVE_RE = re.compile('^#\s*drmr:(?P<directive>job|wait)(\s(?P<args>.*))*')
+DIRECTIVES = ['job', 'label', 'wait']
+DIRECTIVE_RE = re.compile('^#\s*drmr:(?P<directive>{})(\s(?P<args>.*))*'.format('|'.join(DIRECTIVES)))
 EMPTY_RE = re.compile('^\s*$')
 
 
@@ -62,7 +62,7 @@ def parse_directive(line):
         directive = match.group('directive')
         args = match.group('args')
         logger.debug('directive: {}, args: {}'.format(directive, args))
-        if args:
+        if directive == 'job' and args:
             arg_keys = [arg.split('=')[0] for arg in args.split()]
             for arg in arg_keys:
                 if arg not in JOB_DIRECTIVES:

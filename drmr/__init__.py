@@ -25,8 +25,35 @@ class ConfigurationError(EnvironmentError):
     pass
 
 
-class SubmissionError(subprocess.CalledProcessError):
-    pass
+class ControlError(subprocess.CalledProcessError):
+    """
+    Base exception for job control commands: submit, delete, alter.
+    """
+
+    action = ''
+
+    def __init__(self, returncode, cmd, output=None, job_ids=[]):
+        self.returncode = returncode
+        self.cmd = cmd
+        self.output = output
+        self.job_ids = job_ids
+
+    def __str__(self):
+        job_list = self.job_ids and ' job{} {}'.format(len(self.job_ids) > 1 and 's' or '', ', '.join(self.job_ids))
+        return "Error {}{}: '{}' returned non-zero exit status {:d}".format(
+            self.action and 'trying to ' + self.action,
+            job_list,
+            ' '.join(self.cmd),
+            self.returncode
+        )
+
+
+class DeletionError(ControlError):
+    action = 'delete'
+
+
+class SubmissionError(ControlError):
+    action = 'submit'
 
 
 RESOURCE_MANAGERS = {
@@ -110,7 +137,7 @@ def get_resource_manager(name):
     """Given the name of a resource manager, return an instance of it."""
     if name in RESOURCE_MANAGERS:
         return RESOURCE_MANAGERS[name]()
-    raise KeyError('Unrecognized resource manager "{}"'.format(name))
+    raise ConfigurationError('Unrecognized resource manager "{}"'.format(name))
 
 
 def guess_resource_manager():

@@ -156,7 +156,10 @@ def parse_arguments():
     parser.add_argument('-d', '--destination', dest='destination', help='The queue/partition in which to run the jobs.')
     parser.add_argument('--debug', dest='debug', action='store_true', help='Turn on debug-level logging.')
     parser.add_argument('-j', '--job-name', dest='job_name', required=True, help='The job name.')
-    parser.add_argument('-m', '--mail-at-finish', dest='mail_at_finish', action='store_true', help='If specified, mail will be sent when all jobs are finished.')
+    parser.add_argument('-f', '--from-label', dest='from_label', help='Ignore script lines before the given label.')
+    parser.add_argument('-m', '--mail-at-finish', dest='mail_at_finish', action='store_true', help='Send mail when all jobs are finished.')
+    parser.add_argument('--start-held', dest='start_held', action='store_true', help='Submit a held job at the start of the pipeline, which must be released to start execution.')
+    parser.add_argument('-t', '--to-label', dest='to_label', help='Ignore script lines after the given label.')
     parser.add_argument('-w', '--wait-list', dest='wait_list', help="A colon-separated list of job IDs that must complete before any of this script's jobs are started.")
     parser.add_argument('input', help='The file containing commands to submit. Use "-" for stdin.')
 
@@ -170,13 +173,26 @@ def make_wait_list_note(wait_list):
     return note
 
 
-def create_jobs(resource_manager, template_data, script, wait_list=[], mail_at_finish=False):
+def create_jobs(resource_manager, template_data, script, wait_list=[], mail_at_finish=False, from_label=None, to_label=None, start_held=False):
+    logger = logging.getLogger('{}.{}'.format(__name__, create_jobs.__name__))
+
     master_job_name = template_data['job_name']
 
     all_jobs = []
     prereqs = wait_list[:]
     job_directives = {}
     i = 1
+    from_label_seen = False
+    to_label_seen = False
+
+    if from_label:
+        logger.debug('Skipping everything before label "{}"'.format(from_label))
+
+    if to_label:
+        logger.debug('Skipping everything after label "{}"'.format(to_label))
+
+    hold_job_submitted = False
+
     for line in script:
         job_name = master_job_name + '.%s' % i
 
@@ -187,18 +203,41 @@ def create_jobs(resource_manager, template_data, script, wait_list=[], mail_at_f
 
         directive, args = drmr.script.parse_directive(line)
         if directive:
-            if directive == 'wait' and wait_list:
+            if directive == 'job' and args:
+                if args == 'default':
+                    job_directives = {}
+                else:
+                    job_directives = dict([a.split('=', 1) for a in args.split()])
+            elif directive == 'label':
+                if from_label is not None and from_label in args:
+                    from_label_seen = True
+                    logger.debug('From label "{}" seen. Starting.'.format(from_label))
+                if to_label is not None and to_label in args:
+                    to_label_seen = True
+                    logger.debug('To label "{}" seen. Stopping.'.format(to_label))
+                    break
+            elif directive == 'wait' and wait_list:
                 i += 1
                 job_data['notes'] = make_wait_list_note(wait_list)
                 job_id = resource_manager.submit_completion_jobs(job_data, [wait_id for wait_id, wait_name in wait_list])
                 wait_list = [(job_id, job_name + '.success')]
                 prereqs = wait_list[:]
-            elif directive == 'job' and args:
-                if args == 'default':
-                    job_directives = {}
-                else:
-                    job_directives = dict([a.split('=', 1) for a in args.split()])
         else:
+            if from_label is not None and not from_label_seen:
+                logger.debug('From label not yet seen, skipping line [{}]'.format(line))
+                continue
+
+            if start_held and not hold_job_submitted:
+                logger.debug('Submitting start hold job.')
+                hold_data = copy.deepcopy(template_data)
+                hold_job_name = master_job_name + '.start'
+                hold_data['job_name'] = hold_job_name
+                hold_data['command'] = """echo 'Job "{}" started.'""".format(master_job_name)
+                job_file = resource_manager.write_job_file(hold_data)
+                job_id = resource_manager.submit(job_file, start_held)
+                prereqs.insert(0, ((job_id, hold_job_name)))
+                hold_job_submitted = True
+
             i += 1
             job_data.update(job_directives)
             job_data['command'] = line
@@ -230,17 +269,14 @@ if __name__ == '__main__':
     if args.debug:
         logging.basicConfig(level=logging.DEBUG)
 
+    logger = logging.getLogger(sys.argv[0])
+
     try:
         config = drmr.load_configuration({'account': args.account, 'destination': args.destination})
+        resource_manager = drmr.get_resource_manager(config['resource_manager'])
     except drmr.ConfigurationError as e:
         print(e, file=sys.stderr)
         sys.exit(1)
-
-    if 'resource_manager' not in config:
-        print('Please specify your resource manager in your drmr configuration file.', file=sys.stderr)
-        sys.exit(1)
-
-    rm = drmr.get_resource_manager(config['resource_manager'])
 
     template_data = {
         'account': config['account'],
@@ -258,7 +294,7 @@ if __name__ == '__main__':
 
     wait_list = args.wait_list and args.wait_list.split(':') or []
     try:
-        all_jobs, completion_job_id = create_jobs(rm, template_data, script, wait_list, mail_at_finish=args.mail_at_finish)
+        all_jobs, completion_job_id = create_jobs(resource_manager, template_data, script, wait_list, mail_at_finish=args.mail_at_finish, from_label=args.from_label, to_label=args.to_label, start_held=args.start_held)
     except drmr.SubmissionError as e:
         print('\nYour script could not be submitted.')
         print("Command '%s' returned %s." % (' '.join(e.cmd), e.returncode))

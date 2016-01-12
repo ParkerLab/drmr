@@ -16,6 +16,7 @@ import logging
 import os
 import re
 import subprocess
+import sys
 import time
 import uuid
 import textwrap
@@ -138,7 +139,7 @@ class DistributedResourceManager(object):
         if 'working_directory' not in job_data:
             job_data['working_directory'] = os.getcwd()
 
-    def submit(self, job_file):
+    def submit(self, job_file, hold=False):
         """Submit a job file. Return the job ID."""
         raise NotImplementedError
 
@@ -307,9 +308,12 @@ class PBS(DistributedResourceManager):
             else:
                 if logger.isEnabledFor(logging.DEBUG):
                     logger.debug(self.explain_job_deletion(job_ids, job_name, job_owner, dry_run))
-                for target in targets:
+                for target in sorted(targets):
                     command = ['qdel', target]
-                    subprocess.check_call(command)
+                    try:
+                        subprocess.check_call(command)
+                    except subprocess.CalledProcessError as e:
+                        raise drmr.DeletionError(e.returncode, e.cmd, e.output, [target])
                     time.sleep(0.25)  # PBS is frail
 
     def get_active_job_ids(self, job_ids=[], job_name=None, job_owner=None):
@@ -323,9 +327,11 @@ class PBS(DistributedResourceManager):
                 continue
 
             if job_name and job_name not in job.Job_Name.text:
+                print('job name {} != {}'.format(job_name, job.Job_Name.text), file=sys.stderr)
                 continue
 
             if job_ids and job.Job_Id.text not in job_ids:
+                print('job id no good {}'.format(job.Job_Id.text), file=sys.stderr)
                 continue
 
             owner = job.Job_Owner.text.split('@')[0]
@@ -383,12 +389,14 @@ class PBS(DistributedResourceManager):
                 )
             )
 
-    def submit(self, job_filename):
+    def submit(self, job_filename, hold=False):
         if not self.is_installed():
             raise drmr.ConfigurationError('{} is not installed or not usable.'.format(self.name))
 
         try:
             command = ['qsub', job_filename]
+            if hold:
+                command.insert(1, '-h')
             job_id = self.capture_process_output(command)
             return job_id.strip()
         except subprocess.CalledProcessError as e:
@@ -520,7 +528,10 @@ class Slurm(DistributedResourceManager):
                 if logger.isEnabledFor(logging.DEBUG):
                     logger.debug(self.explain_job_deletion(job_ids, job_name, job_owner, dry_run))
                 command = ['scancel'] + list(targets)
-                subprocess.check_call(command)
+                try:
+                    subprocess.check_call(command)
+                except subprocess.CalledProcessError as e:
+                    raise drmr.DeletionError(e.returncode, e.cmd, e.output, targets)
 
     def get_active_job_ids(self, job_ids=[], job_name=None, job_owner=None):
         jobs = set([])
@@ -594,12 +605,15 @@ class Slurm(DistributedResourceManager):
                 )
             )
 
-    def submit(self, job_filename):
+    def submit(self, job_filename, hold=False):
         if not self.is_installed():
             raise drmr.ConfigurationError('{} is not installed or not usable.'.format(self.name))
 
         try:
             command = ['sbatch', '--parsable', job_filename]
+            if hold:
+                command.insert(1, '--hold')
+
             job_id = self.capture_process_output(command)
             return job_id.strip().split(';')[0]
         except subprocess.CalledProcessError as e:
