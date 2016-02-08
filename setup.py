@@ -11,14 +11,15 @@ except ImportError:
 readme = open('README.rst').read()
 
 requirements = [
-    'Jinja2'
+    'Jinja2',
+    'lxml'
 ]
 
 test_requirements = []
 
 setup(
     name='drmr',
-    version='0.1.1',
+    version='0.1.2',
     description="A tool for submitting pipeline scripts to distributed resource managers.",
     long_description=readme + '\n\n',
     author="The Parker Lab",

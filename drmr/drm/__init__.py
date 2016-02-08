@@ -28,6 +28,9 @@ import drmr
 import drmr.util
 
 
+MEMORY_RE = re.compile('^([0-9]+)(?:([gmt])b?)?$', re.IGNORECASE)
+
+
 class DistributedResourceManager(object):
     name = 'Base Distributed Resource Manager'
     default_job_template = ''
@@ -110,12 +113,33 @@ class DistributedResourceManager(object):
         self.set_working_directory(template_data)
         self.set_mail_event_string(template_data)
         self.set_job_name(template_data)
+        self.normalize_memory(template_data)
 
         python_virtualenv = os.getenv('VIRTUAL_ENV')
         if python_virtualenv:
             template_data['environment_setup'].append('. {}/bin/activate'.format(python_virtualenv))
 
         return template_data
+
+    def normalize_memory(self, job_data):
+        """
+        Normalize the amount of memory requested to megabytes.
+        """
+
+        memory = job_data.get('memory')
+        if not memory:
+            return
+
+        match = MEMORY_RE.match(memory)
+        if match:
+            amount, unit = match.groups()
+            amount = int(amount)
+            unit = unit.lower()
+            if unit == 'g':
+                amount *= 1000
+            elif unit == 't':
+                amount *= 1000 * 1000
+            job_data['memory'] = amount
 
     def set_control_directory(self, job_data):
         """Add the path of the control directory to the job data."""
@@ -161,6 +185,7 @@ class DistributedResourceManager(object):
         success_commands = ['touch {control_directory}/{job_name}.success'.format(**success_data)]
         success_data.update({
             'job_name': success_data['job_name'] + '.success',
+            'time_limit': '00:15:00',
             'dependencies': {'ok': job_list},
             'command': '\n'.join(success_commands),
         })
@@ -175,6 +200,7 @@ class DistributedResourceManager(object):
         finish_commands = ['touch {control_directory}/{job_name}.finished'.format(**finish_data)]
         finish_data.update({
             'job_name': finish_data['job_name'] + '.finish',
+            'time_limit': '00:15:00',
             'dependencies': {'any': job_list},
             'command': '\n'.join(finish_commands)
         })

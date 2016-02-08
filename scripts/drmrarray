@@ -61,6 +61,20 @@ HELP = """
 })
 
 
+def parse_slot_limit(slot_limit):
+    """Makes sure slot limit is 'all' or a valid integer."""
+    try:
+        slot_limit = int(slot_limit)
+    except ValueError:
+        try:
+            if slot_limit.lower() == 'all':
+                slot_limit = 'all'
+        except AttributeError:  # not a string
+            slot_limit = 100
+
+    return slot_limit
+
+
 def parse_arguments():
     parser = argparse.ArgumentParser(
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -73,7 +87,9 @@ def parse_arguments():
     parser.add_argument('--debug', dest='debug', action='store_true', help='Turn on debug-level logging.')
     parser.add_argument('-f', '--finish-jobs', dest='finish_jobs', action='store_true', help='If specified, two extra jobs will be queued after the main array, to indicate success and completion.')
     parser.add_argument('-j', '--job-name', dest='job_name', required=True, help='The job name.')
-    parser.add_argument('-m', '--mail-at-finish', dest='mail_at_finish', action='store_true', help='If specified, mail will be sent when all jobs are finished.')
+    parser.add_argument('--mail-at-finish', dest='mail_at_finish', action='store_true', help='Send mail when all jobs are finished.')
+    parser.add_argument('--mail-on-error', dest='mail_on_error', action='store_true', help='Send mail if any job fails.')
+    parser.add_argument('-s', '--slot-limit', type=parse_slot_limit, default='all', dest='slot_limit', help="The number of jobs that will be run concurrently when the job is started, or 'all' (the default).")
     parser.add_argument('-w', '--wait-list', dest='wait_list', help="A colon-separated list of job IDs that must complete before any of this script's jobs are started.")
     parser.add_argument('input', help='The file containing commands to submit. Use "-" for stdin.')
 
@@ -106,11 +122,13 @@ def create_jobs(resource_manager, template_data, script, wait_list=[]):
             commands.append(resource_manager.make_array_command(command_data))
 
     command_count = max(len(commands), 1)
+    slot_limit = job_data.get('slot_limit', 'all')
+
     job_data.update({
         'array_controls': {
             'array_index_min': 1,
             'array_index_max': command_count,
-            'array_concurrent_jobs': command_count
+            'array_concurrent_jobs': slot_limit == 'all' and command_count or slot_limit
         },
         'command': '\n'.join(commands)
     })
@@ -139,8 +157,11 @@ if __name__ == '__main__':
         'account': config['account'],
         'destination': config['destination'],
         'job_name': args.job_name,
+        'slot_limit': args.slot_limit,
         'working_directory': os.path.abspath(os.getcwd()),
     }
+    if args.mail_on_error:
+        template_data['mail_events'] = ['FAIL']
 
     if args.input != '-' and not os.access(args.input, os.R_OK):
         print('Cannot read script file "{}"'.format(args.input), file=sys.stderr)

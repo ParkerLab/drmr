@@ -15,7 +15,6 @@ JOB_DIRECTIVES = {
     'account': 'The account to which the job will be billed.',
     "default": "Use the resource manager's default job parameters.",
     'destination': 'The execution environment (queue, partition, etc.) for the job.',
-    'mail_events': 'A list of job events ({}) that will trigger email notifications.'.format(drmr.MAIL_EVENTS),
     'job_name': 'A name for the job.',
     'memory': 'The amount of memory required on any one node.',
     'nodes': 'The number of nodes required for the job.',

@@ -10,7 +10,7 @@
 
 __author__ = 'The Parker Lab'
 __email__ = 'parkerlab-software@umich.edu'
-__version__ = '0.1.1'
+__version__ = '0.1.2'
 
 
 import json
