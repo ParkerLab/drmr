@@ -197,6 +197,7 @@ def create_jobs(resource_manager, template_data, script, wait_list=[], mail_at_f
         job_name = master_job_name + '.%s' % i
 
         job_data = copy.deepcopy(template_data)
+        job_data.update(job_directives)
         job_data['job_name'] = job_name
         if mail_on_error:
             job_data['mail_events'] = ['FAIL']
@@ -208,6 +209,7 @@ def create_jobs(resource_manager, template_data, script, wait_list=[], mail_at_f
                     job_directives = {}
                 else:
                     job_directives = dict([a.split('=', 1) for a in args.split()])
+                    job_data.update(job_directives)
             elif directive == 'label':
                 if from_label is not None and from_label in args:
                     from_label_seen = True
@@ -238,7 +240,6 @@ def create_jobs(resource_manager, template_data, script, wait_list=[], mail_at_f
                 hold_job_submitted = True
 
             i += 1
-            job_data.update(job_directives)
             job_data['command'] = line
             if prereqs:
                 job_data['dependencies'] = {'ok': [wait_id for wait_id, wait_name in prereqs]}
@@ -250,6 +251,7 @@ def create_jobs(resource_manager, template_data, script, wait_list=[], mail_at_f
             all_jobs.append(job_id)
 
     completion_data = copy.deepcopy(template_data)
+    completion_data.update(job_directives)
     completion_data['job_name'] = master_job_name
     completion_data['notes'] = make_wait_list_note(wait_list)
     completion_job_id = resource_manager.submit_completion_jobs(completion_data, [w[0] for w in wait_list], mail_at_finish=mail_at_finish)

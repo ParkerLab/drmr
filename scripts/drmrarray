@@ -55,6 +55,7 @@ HELP = """
       limit of 12 hours of execution time on one node:
 
       # drmr:job nodes=1 processors=4 processor_memory=8000 time_limit=12:00:00
+
 """.format(**{
     'job_directives': '\n'.join('      {}: {}'.format(*i) for i in drmr.script.JOB_DIRECTIVES.items()),
     'resource_managers': '\n'.join('      {}'.format(name) for name in drmr.RESOURCE_MANAGERS.keys()),

@@ -132,7 +132,7 @@ class DistributedResourceManager(object):
 
         match = MEMORY_RE.match(memory)
         if match:
-            amount, unit = match.groups()
+            amount, unit = match.groups('')
             amount = int(amount)
             unit = unit.lower()
             if unit == 'g':
