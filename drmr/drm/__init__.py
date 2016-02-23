@@ -186,6 +186,9 @@ class DistributedResourceManager(object):
         success_data.update({
             'job_name': success_data['job_name'] + '.success',
             'time_limit': '00:15:00',
+            'processors': '1',
+            'processor_memory': '1000',
+            'memory': '1000',
             'dependencies': {'ok': job_list},
             'command': '\n'.join(success_commands),
         })
@@ -201,6 +204,9 @@ class DistributedResourceManager(object):
         finish_data.update({
             'job_name': finish_data['job_name'] + '.finish',
             'time_limit': '00:15:00',
+            'processors': '1',
+            'processor_memory': '1000',
+            'memory': '1000',
             'dependencies': {'any': job_list},
             'command': '\n'.join(finish_commands)
         })
@@ -382,6 +388,8 @@ class PBS(DistributedResourceManager):
 
         self.set_control_directory(job_data)
         filename = drmr.util.absjoin(job_data['control_directory'], job_data['job_name'])
+        if not os.path.exists(job_data['control_directory']):
+            os.makedirs(job_data['control_directory'])
         with open(filename, 'w') as canceller:
             canceller.write('#!/bin/sh\n\n')
             for job_id in job_ids:
@@ -602,6 +610,8 @@ class Slurm(DistributedResourceManager):
 
         self.set_control_directory(job_data)
         filename = drmr.util.absjoin(job_data['control_directory'], job_data['job_name'])
+        if not os.path.exists(job_data['control_directory']):
+            os.makedirs(job_data['control_directory'])
         with open(filename, 'w') as canceller:
             canceller.write('#!/bin/sh\n\n')
             for job in job_ids:
