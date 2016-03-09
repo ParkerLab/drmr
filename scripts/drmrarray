@@ -5,7 +5,7 @@
 # drmrarray: A tool for submitting pipeline scripts to distributed
 # resource managers in array jobs.
 #
-# Copyright 2015 The Parker Lab at the University of Michigan
+# Copyright 2015 Stephen Parker
 #
 # Licensed under Version 3 of the GPL or any later version
 #
@@ -20,6 +20,8 @@ import sys
 import textwrap
 
 import drmr
+import drmr.config
+import drmr.exceptions
 import drmr.script
 
 
@@ -58,7 +60,7 @@ HELP = """
 
 """.format(**{
     'job_directives': '\n'.join('      {}: {}'.format(*i) for i in drmr.script.JOB_DIRECTIVES.items()),
-    'resource_managers': '\n'.join('      {}'.format(name) for name in drmr.RESOURCE_MANAGERS.keys()),
+    'resource_managers': '\n'.join('      {}'.format(name) for name in drmr.config.RESOURCE_MANAGERS.keys()),
 })
 
 
@@ -87,7 +89,7 @@ def parse_arguments():
     parser.add_argument('-d', '--destination', dest='destination', help='The queue/partition in which to run the jobs.')
     parser.add_argument('--debug', dest='debug', action='store_true', help='Turn on debug-level logging.')
     parser.add_argument('-f', '--finish-jobs', dest='finish_jobs', action='store_true', help='If specified, two extra jobs will be queued after the main array, to indicate success and completion.')
-    parser.add_argument('-j', '--job-name', dest='job_name', required=True, help='The job name.')
+    parser.add_argument('-j', '--job-name', dest='job_name', help='The job name.')
     parser.add_argument('--mail-at-finish', dest='mail_at_finish', action='store_true', help='Send mail when all jobs are finished.')
     parser.add_argument('--mail-on-error', dest='mail_on_error', action='store_true', help='Send mail if any job fails.')
     parser.add_argument('-s', '--slot-limit', type=parse_slot_limit, default='all', dest='slot_limit', help="The number of jobs that will be run concurrently when the job is started, or 'all' (the default).")
@@ -148,16 +150,16 @@ if __name__ == '__main__':
     logging.basicConfig(level=loglevel, format=drmr.script.LOGGING_FORMAT)
 
     try:
-        config = drmr.load_configuration({'account': args.account, 'destination': args.destination})
-        resource_manager = drmr.get_resource_manager(config['resource_manager'])
-    except drmr.ConfigurationError as e:
+        config = drmr.config.load_configuration({'account': args.account, 'destination': args.destination})
+        resource_manager = drmr.config.get_resource_manager(config['resource_manager'])
+    except drmr.exceptions.ConfigurationError as e:
         print(e, file=sys.stderr)
         sys.exit(1)
 
     template_data = {
         'account': config['account'],
         'destination': config['destination'],
-        'job_name': args.job_name,
+        'job_name': args.job_name or os.path.basename(args.input),
         'slot_limit': args.slot_limit,
         'working_directory': os.path.abspath(os.getcwd()),
     }
@@ -178,7 +180,7 @@ if __name__ == '__main__':
         if args.finish_jobs or args.mail_at_finish:
             completion_job_id = resource_manager.submit_completion_jobs(template_data, [completion_job_id], mail_at_finish=args.mail_at_finish)
         print(completion_job_id)
-    except drmr.SubmissionError as e:
+    except drmr.exceptions.SubmissionError as e:
         print('\nYour script could not be submitted.')
         print("Command '%s' returned %s." % (' '.join(e.cmd), e.returncode))
         print("Command output was:\n\n%s\n" % e.output)

@@ -13,6 +13,8 @@ import logging
 import sys
 
 import drmr
+import drmr.config
+import drmr.exceptions
 import drmr.script
 
 
@@ -38,12 +40,12 @@ if __name__ == '__main__':
     logging.basicConfig(level=loglevel, format=drmr.script.LOGGING_FORMAT)
 
     try:
-        config = drmr.load_configuration()
-        resource_manager = drmr.get_resource_manager(config['resource_manager'])
+        config = drmr.config.load_configuration()
+        resource_manager = drmr.config.get_resource_manager(config['resource_manager'])
         resource_manager.delete_jobs(args.job_ids, args.job_name, args.user, args.dry_run)
-    except drmr.ConfigurationError as e:
+    except drmr.exceptions.ConfigurationError as e:
         print(e, file=sys.stderr)
         sys.exit(1)
-    except drmr.DeletionError as e:
+    except drmr.exceptions.DeletionError as e:
         print(e, file=sys.stderr)
         sys.exit(1)

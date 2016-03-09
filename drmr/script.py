@@ -1,8 +1,12 @@
-# -*- coding: utf-8 -*-
+#
+# drmr: A tool for submitting pipeline scripts to distributed resource
+# managers.
+#
+# Copyright 2015 Stephen Parker
+#
+# Licensed under Version 3 of the GPL or any later version
+#
 
-"""
-Utilities for parsing POSIX scripts for creation of drmr jobs.
-"""
 
 import logging
 import re
@@ -18,10 +22,11 @@ JOB_DIRECTIVES = {
     'job_name': 'A name for the job.',
     'memory': 'The amount of memory required on any one node.',
     'nodes': 'The number of nodes required for the job.',
+    'node_properties': 'A comma-separated list of properties each node must have.',
     'processors': 'The number of cores required on each node.',
     'processor_memory': 'The amount of memory required per processor.',
     'email': """The submitter's email address, for notifications.""",
-    'time_limit': 'The maximum amount of time the DRM should allow the job, in HH:MM:SS format.',
+    'time_limit': 'The maximum amount of time the DRM should allow the job: "12:30:00" or "12h30m".',
     'working_directory': 'The directory where the job should be run.',
 }
 
@@ -53,7 +58,7 @@ def is_directive(line):
 
 def parse_directive(line):
     """Parse a drmr directive from the line, returning a tuple of the directive and its arguments."""
-    logger = logging.getLogger("{}.{}".format(__name__, parse_directive.__name__ ))
+    logger = logging.getLogger("{}.{}".format(__name__, parse_directive.__name__))
 
     directive = args = None
     match = DIRECTIVE_RE.match(line)

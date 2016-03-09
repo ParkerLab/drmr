@@ -2,30 +2,31 @@
 # drmr: A tool for submitting pipeline scripts to distributed resource
 # managers.
 #
-# Copyright 2015 The Parker Lab at the University of Michigan
+# Copyright 2015 Stephen Parker
 #
 # Licensed under Version 3 of the GPL or any later version
 #
 
 
+import copy
 import decimal
 import os
 import re
 
 
-MEMORY = re.compile('^([0-9]+)(?:([gmt])b?)?$', re.IGNORECASE)
+MEMORY = re.compile('^([0-9]+)(?:([gkmt])b?)?$', re.IGNORECASE)
 
+# First, let me apologize for you having to spend part of your life
+# trying to parse this nasty regular expression.
+#
+# Now that that's out of the way: most of the hideousness is the two
+# lookahead expressions that make sure we only extract days and hours
+# if the rest of the time is present.
 TIME = re.compile(
-    '\A(?:(?P<hours>\d+(?:\.\d+)*)*:(?=(?:\d+(?:\.\d+)*)(?::(?:\d+(?:\.\d+)*))))*'
-    '(?P<minutes>\d+(?:\.\d+)*)'
-    '(?::(?P<seconds>\d+(?:\.\d+)*))*\Z'
-)
-
-TIME_WITH_DAYS = re.compile(
-    '\A(?P<days>\d+(?:\.\d+)*)-'
-    '(?:(?:(?P<hours>\d+(?:\.\d+)*)'
-    '(?::(?P<minutes>\d+(?:\.\d+)*)'
-    '(?::(?P<seconds>\d+(?:\.\d+)*)*)*)*))*\Z'
+    '\A(?:(?:(?P<days>\d+(?:\.\d+)*)?[-:])(?=(?:\d+(?:\.\d+)?)(?::\d+(?:\.\d+)?)(?::(?:\d+(?:\.\d+)?))))?'
+    '(?:(?P<hours>\d+(?:\.\d+)*)?:(?=(?:\d+(?:\.\d+)?)(?::(?:\d+(?:\.\d+)?))))?'
+    '(?P<minutes>\d+(?:\.\d+)?)'
+    '(?::(?P<seconds>\d+(?:\.\d+)?))?\Z'
 )
 
 FLOAT_PATTERN = '\d+(?:\.\d+)*'
@@ -33,8 +34,8 @@ FLOAT_PATTERN = '\d+(?:\.\d+)*'
 DAYS = re.compile('(' + FLOAT_PATTERN + ')d')
 HOURS = re.compile('(' + FLOAT_PATTERN + ')h')
 MINUTES = re.compile('(' + FLOAT_PATTERN + ')m')
-SECONDS = re.compile('(' + FLOAT_PATTERN + ')s?\Z')
-
+SECONDS = re.compile('(' + FLOAT_PATTERN + ')(?:s|\Z)')
+TIME_UNITS = re.compile('(' + FLOAT_PATTERN + ')[dhms\Z]')
 
 def normalize_memory(memory):
     """
@@ -53,6 +54,8 @@ def normalize_memory(memory):
         unit = unit.lower()
         if unit == 'g':
             amount *= 1000
+        elif unit == 'k':
+            amount /= 1000
         elif unit == 't':
             amount *= 1000 * 1000
 
@@ -64,21 +67,25 @@ def tally_time_units(regex, time_string):
     return sum(occurrence and float(occurrence) or 0.0 for occurrence in occurrences)
 
 
-def parse_time(time):
-    m = TIME_WITH_DAYS.match(time)
+def parse_time(time_string):
+    m = TIME.match(time_string)
     if m:
         return {k: v and float(v) or 0.0 for k, v in m.groupdict().items()}
 
-    m = TIME.match(time)
-    if m:
-        return {k: v and float(v) or 0.0 for k, v in m.groupdict().items()}
+    if TIME_UNITS.search(time_string) is None:
+        raise SyntaxError('Could not find a time in "{}"'.format(time_string))
 
-    return {
-        'days': tally_time_units(DAYS, time),
-        'hours': tally_time_units(HOURS, time),
-        'minutes': tally_time_units(MINUTES, time),
-        'seconds': tally_time_units(SECONDS, time)
+    result = {
+        'days': tally_time_units(DAYS, time_string),
+        'hours': tally_time_units(HOURS, time_string),
+        'minutes': tally_time_units(MINUTES, time_string),
+        'seconds': tally_time_units(SECONDS, time_string)
     }
+
+    if sum(result.values()) <= 0:
+        raise ValueError('Could not parse a positive time value from "{}'.format(time_string))
+
+    return result
 
 
 def make_time_string(days=0, hours=0, minutes=0, seconds=0):
@@ -111,7 +118,7 @@ def normalize_time(time):
     If the input can be parsed, returns a string containing whole
     integers in the format hours:minutes:seconds.
 
-    Otherwise returns the input.
+    Raises SyntaxError if the input cannot be parsed.
     """
 
     return make_time_string(**parse_time(time))
@@ -134,3 +141,10 @@ def makedirs(*paths):
 def absjoin(*paths):
     """Simple combination of os.path.abspath and os.path.join."""
     return os.path.abspath(os.path.join(*paths))
+
+
+def merge_mappings(*mappings):
+    merged_mapping = copy.deepcopy(mappings[0])
+    for mapping in mappings[1:]:
+        merged_mapping.update(mapping)
+    return merged_mapping

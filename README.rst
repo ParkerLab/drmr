@@ -50,6 +50,10 @@ At the command line::
   git clone https://github.com/ParkerLab/drmr
   pip install ./drmr
 
+Or in one step::
+
+  pip install git+https://github.com/ParkerLab/drmr
+
 License
 =======
 
