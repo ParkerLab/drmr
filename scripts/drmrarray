@@ -144,8 +144,8 @@ if __name__ == '__main__':
 
     args = parse_arguments()
 
-    if args.debug:
-        logging.basicConfig(level=logging.DEBUG)
+    loglevel = args.debug and logging.DEBUG or logging.INFO
+    logging.basicConfig(level=loglevel, format=drmr.script.LOGGING_FORMAT)
 
     try:
         config = drmr.load_configuration({'account': args.account, 'destination': args.destination})

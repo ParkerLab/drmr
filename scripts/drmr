@@ -267,8 +267,8 @@ if __name__ == '__main__':
 
     args = parse_arguments()
 
-    if args.debug:
-        logging.basicConfig(level=logging.DEBUG)
+    loglevel = args.debug and logging.DEBUG or logging.INFO
+    logging.basicConfig(level=loglevel, format=drmr.script.LOGGING_FORMAT)
 
     logger = logging.getLogger(sys.argv[0])
 

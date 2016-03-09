@@ -7,8 +7,8 @@ Utilities for parsing POSIX scripts for creation of drmr jobs.
 import logging
 import re
 
-import drmr
 
+LOGGING_FORMAT = '%(message)s'
 
 # A subset of drmr.JOB_DIRECTIVES, omitting those that don't make sense in a script, and adding 'default'.
 JOB_DIRECTIVES = {

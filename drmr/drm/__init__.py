@@ -28,9 +28,6 @@ import drmr
 import drmr.util
 
 
-MEMORY_RE = re.compile('^([0-9]+)(?:([gmt])b?)?$', re.IGNORECASE)
-
-
 class DistributedResourceManager(object):
     name = 'Base Distributed Resource Manager'
     default_job_template = ''
@@ -55,13 +52,13 @@ class DistributedResourceManager(object):
         raise NotImplementedError
 
     def explain_job_deletion(self, job_ids=[], job_name=None, job_owner=None, dry_run=False):
-        msg = (dry_run and 'Would delete ' or 'Deleting ') + 'jobs belonging to ' + job_owner
-        if job_ids:
-            msg += ' whose IDs are in this list: {}'.format(job_ids)
+        msg = (dry_run and 'Would delete' or 'Deleting') + (job_ids and ' these' or '') + ' jobs belonging to ' + job_owner
         if job_name:
-            if job_ids:
-                msg += ' or'
             msg += ' whose names match "' + job_name + '"'
+
+        if job_ids:
+            msg += ': [{}]'.format(', '.join(sorted(job_ids)))
+
         return msg
 
     def get_active_job_ids(self, job_name=None, job_owner=None):
@@ -114,6 +111,7 @@ class DistributedResourceManager(object):
         self.set_mail_event_string(template_data)
         self.set_job_name(template_data)
         self.normalize_memory(template_data)
+        self.normalize_time_limit(template_data)
 
         python_virtualenv = os.getenv('VIRTUAL_ENV')
         if python_virtualenv:
@@ -130,16 +128,18 @@ class DistributedResourceManager(object):
         if not memory:
             return
 
-        match = MEMORY_RE.match(memory)
-        if match:
-            amount, unit = match.groups('')
-            amount = int(amount)
-            unit = unit.lower()
-            if unit == 'g':
-                amount *= 1000
-            elif unit == 't':
-                amount *= 1000 * 1000
-            job_data['memory'] = amount
+        job_data['memory'] = drmr.util.normalize_memory(memory)
+
+    def normalize_time_limit(self, job_data):
+        """
+        Normalize the time limit requested to hours:minutes:seconds.
+        """
+
+        time_limit = job_data.get('time_limit')
+        if not time_limit:
+            return
+
+        job_data['time_limit'] = drmr.util.normalize_time(time_limit)
 
     def set_control_directory(self, job_data):
         """Add the path of the control directory to the job data."""
@@ -336,10 +336,10 @@ class PBS(DistributedResourceManager):
 
         if targets:
             if dry_run:
-                logger.info(self.explain_job_deletion(job_ids, job_name, job_owner, dry_run))
+                logger.info(self.explain_job_deletion(targets, job_name, job_owner, dry_run))
             else:
                 if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(self.explain_job_deletion(job_ids, job_name, job_owner, dry_run))
+                    logger.debug(self.explain_job_deletion(targets, job_name, job_owner, dry_run))
                 for target in sorted(targets):
                     command = ['qdel', target]
                     try:
@@ -349,6 +349,8 @@ class PBS(DistributedResourceManager):
                     time.sleep(0.25)  # PBS is frail
 
     def get_active_job_ids(self, job_ids=[], job_name=None, job_owner=None):
+        logger = self.get_method_logger()
+
         jobs = set([])
 
         command = ['qstat', '-t', '-x']
@@ -359,11 +361,9 @@ class PBS(DistributedResourceManager):
                 continue
 
             if job_name and job_name not in job.Job_Name.text:
-                print('job name {} != {}'.format(job_name, job.Job_Name.text), file=sys.stderr)
                 continue
 
             if job_ids and job.Job_Id.text not in job_ids:
-                print('job id no good {}'.format(job.Job_Id.text), file=sys.stderr)
                 continue
 
             owner = job.Job_Owner.text.split('@')[0]
@@ -371,6 +371,11 @@ class PBS(DistributedResourceManager):
                 continue
 
             jobs.add(job.Job_Id.text)
+
+        if jobs:
+            logger.debug('Found {} active jobs'.format(len(jobs)))
+        else:
+            logger.debug('No active jobs found.')
 
         return jobs
 
@@ -557,10 +562,10 @@ class Slurm(DistributedResourceManager):
 
         if targets:
             if dry_run:
-                logger.info(self.explain_job_deletion(job_ids, job_name, job_owner, dry_run))
+                logger.info(self.explain_job_deletion(targets, job_name, job_owner, dry_run))
             else:
                 if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(self.explain_job_deletion(job_ids, job_name, job_owner, dry_run))
+                    logger.debug(self.explain_job_deletion(targets, job_name, job_owner, dry_run))
                 command = ['scancel'] + list(targets)
                 try:
                     subprocess.check_call(command)
@@ -568,6 +573,8 @@ class Slurm(DistributedResourceManager):
                     raise drmr.DeletionError(e.returncode, e.cmd, e.output, targets)
 
     def get_active_job_ids(self, job_ids=[], job_name=None, job_owner=None):
+        logger = self.get_method_logger()
+
         jobs = set([])
 
         command = [
@@ -585,13 +592,18 @@ class Slurm(DistributedResourceManager):
                 if job_owner and owner != job_owner:
                     continue
 
-                if job_name and job_name != name:
+                if job_name and job_name not in name:
                     continue
 
                 if job_ids and job_id not in job_ids:
                     continue
 
                 jobs.add(job_id)
+
+        if jobs:
+            logger.debug('Found {} active jobs'.format(len(jobs)))
+        else:
+            logger.debug('No active jobs found.')
 
         return jobs
 
