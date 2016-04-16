@@ -237,7 +237,14 @@ def create_jobs(resource_manager, template_data, script, wait_list=[], mail_at_f
             elif directive == 'wait' and wait_list:
                 job_number += 1
                 job_name = master_job_name + '.{}'.format(job_number)
-                job_data = drmr.util.merge_mappings(template_data, job_directives, {'notes': make_wait_list_note(wait_list)})
+                job_data = drmr.util.merge_mappings(
+                    template_data,
+                    job_directives,
+                    {
+                        'job_name': job_name,
+                        'notes': make_wait_list_note(wait_list),
+                    }
+                )
                 job_id = resource_manager.submit_completion_jobs(job_data, [wait_id for wait_id, wait_name in wait_list])
                 wait_list = [(job_id, job_name + '.success')]
                 prereqs = wait_list[:]
@@ -252,7 +259,7 @@ def create_jobs(resource_manager, template_data, script, wait_list=[], mail_at_f
             wait_list.append((job_id, job_name))
             all_jobs.append(job_id)
 
-    completion_data = drmr.util.merge_mappings(template_data, job_directives, {'job_name': master_job_name, 'notes': make_wait_list_note(wait_list)})
+    completion_data = drmr.util.merge_mappings(template_data, {'job_name': master_job_name, 'notes': make_wait_list_note(wait_list)})
     completion_job_id = resource_manager.submit_completion_jobs(completion_data, [w[0] for w in wait_list], mail_at_finish=mail_at_finish)
 
     cancel_data = drmr.util.merge_mappings(template_data, {'job_name': master_job_name + '.cancel'})
