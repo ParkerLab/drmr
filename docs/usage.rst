@@ -16,8 +16,9 @@ time limits, etc. in ``# drmr:job`` directives.
 
 You can get help, including a full example, by running ``drmr --help``::
 
-    usage: drmr [-h] [-a ACCOUNT] [-d DESTINATION] [--debug] -j JOB_NAME [-m]
-                [-w WAIT_LIST]
+    usage: drmr [-h] [-a ACCOUNT] [-d DESTINATION] [--debug] [-j JOB_NAME]
+                [-f FROM_LABEL] [--mail-at-finish] [--mail-on-error]
+                [--start-held] [-t TO_LABEL] [-w WAIT_LIST]
                 input
 
     Submit a drmr script to a distributed resource manager.
@@ -35,8 +36,14 @@ You can get help, including a full example, by running ``drmr --help``::
       --debug               Turn on debug-level logging.
       -j JOB_NAME, --job-name JOB_NAME
                             The job name.
-      -m, --mail-at-finish  If specified, mail will be sent when all jobs are
-                            finished.
+      -f FROM_LABEL, --from-label FROM_LABEL
+                            Ignore script lines before the given label.
+      --mail-at-finish      Send mail when all jobs are finished.
+      --mail-on-error       Send mail if any job fails.
+      --start-held          Submit a held job at the start of the pipeline, which
+                            must be released to start execution.
+      -t TO_LABEL, --to-label TO_LABEL
+                            Ignore script lines after the given label.
       -w WAIT_LIST, --wait-list WAIT_LIST
                             A colon-separated list of job IDs that must complete
                             before any of this script's jobs are started.
@@ -67,18 +74,18 @@ You can get help, including a full example, by running ``drmr --help``::
 
       You can customize the following job parameters:
 
-      time_limit: The maximum amount of time the DRM should allow the job, in HH:MM:SS format.
+      time_limit: The maximum amount of time the DRM should allow the job: "12:30:00" or "12h30m".
       working_directory: The directory where the job should be run.
       processor_memory: The amount of memory required per processor.
+      node_properties: A comma-separated list of properties each node must have.
       account: The account to which the job will be billed.
       processors: The number of cores required on each node.
       default: Use the resource manager's default job parameters.
       destination: The execution environment (queue, partition, etc.) for the job.
-      email: The submitter's email address, for notifications.
-      memory: The amount of memory required on any one node.
-      mail_events: A list of job events (['BEGIN', 'END', 'FAIL']) that will trigger email notifications.
-      nodes: The number of nodes required for the job.
       job_name: A name for the job.
+      memory: The amount of memory required on any one node.
+      nodes: The number of nodes required for the job.
+      email: The submitter's email address, for notifications.
 
       Whatever you specify will apply to all jobs after the directive.
 
@@ -175,8 +182,9 @@ script, and will apply to all jobs in the array.
 
 You can get help, including a full example, by running `drmrarray --help`::
 
-    usage: drmrarray [-h] [-a ACCOUNT] [-d DESTINATION] [--debug] [-f] -j JOB_NAME
-                     [-m] [-w WAIT_LIST]
+    usage: drmrarray [-h] [-a ACCOUNT] [-d DESTINATION] [--debug] [-f]
+                     [-j JOB_NAME] [--mail-at-finish] [--mail-on-error]
+                     [-s SLOT_LIMIT] [-w WAIT_LIST]
                      input
 
     Submit a drmr script to a distributed resource manager as a job array.
@@ -196,8 +204,11 @@ You can get help, including a full example, by running `drmrarray --help`::
                             main array, to indicate success and completion.
       -j JOB_NAME, --job-name JOB_NAME
                             The job name.
-      -m, --mail-at-finish  If specified, mail will be sent when all jobs are
-                            finished.
+      --mail-at-finish      Send mail when all jobs are finished.
+      --mail-on-error       Send mail if any job fails.
+      -s SLOT_LIMIT, --slot-limit SLOT_LIMIT
+                            The number of jobs that will be run concurrently when
+                            the job is started, or 'all' (the default).
       -w WAIT_LIST, --wait-list WAIT_LIST
                             A colon-separated list of job IDs that must complete
                             before any of this script's jobs are started.
@@ -207,9 +218,9 @@ You can get help, including a full example, by running `drmrarray --help`::
       Slurm
       PBS
 
-    drmr will read configuration from your ~/.drmrc, which must be
-    valid JSON. You can specify your resource manager and default
-    values for any job parameters listed below.
+    drmrarray will read configuration from your ~/.drmrc, which must be valid
+    JSON. You can specify your resource manager and default values for any job
+    parameters listed below.
 
     Directives
     ==========
@@ -221,18 +232,18 @@ You can get help, including a full example, by running `drmrarray --help`::
 
       You can customize the following job parameters:
 
-      time_limit: The maximum amount of time the DRM should allow the job, in HH:MM:SS format.
+      time_limit: The maximum amount of time the DRM should allow the job: "12:30:00" or "12h30m".
       working_directory: The directory where the job should be run.
       processor_memory: The amount of memory required per processor.
+      node_properties: A comma-separated list of properties each node must have.
       account: The account to which the job will be billed.
       processors: The number of cores required on each node.
       default: Use the resource manager's default job parameters.
       destination: The execution environment (queue, partition, etc.) for the job.
-      email: The submitter's email address, for notifications.
-      memory: The amount of memory required on any one node.
-      mail_events: A list of job events (['BEGIN', 'END', 'FAIL']) that will trigger email notifications.
-      nodes: The number of nodes required for the job.
       job_name: A name for the job.
+      memory: The amount of memory required on any one node.
+      nodes: The number of nodes required for the job.
+      email: The submitter's email address, for notifications.
 
       Whatever you specify will apply to all jobs after the directive.
 
@@ -253,12 +264,12 @@ Creates the drmr configuration file, `.drmrc`. It will try to detect
 the DRM in use on your system, but you can specify it explicitly, as
 well as a default account or destination for your jobs.
 
-usage: drmr_configure [-h] [-a ACCOUNT] [-d DESTINATION] [-o]
-                      [-r RESOURCE_MANAGER]
-
-Generate a drmr configuration file for your local environment.
-
 Help is available by running `drmr_configure --help`::
+
+    usage: drmr_configure [-h] [-a ACCOUNT] [-d DESTINATION] [-o]
+                          [-r RESOURCE_MANAGER]
+
+    Generate a drmr configuration file for your local environment.
 
     optional arguments:
       -h, --help            show this help message and exit

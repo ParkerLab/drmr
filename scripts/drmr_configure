@@ -36,7 +36,7 @@ if __name__ == '__main__':
     parser.add_argument('-a', '--account', dest='account', help='The account to which jobs will be charged by default.')
     parser.add_argument('-d', '--destination', dest='destination', help='The default queue/partition in which to run jobs.')
     parser.add_argument('-o', '--overwrite', dest='overwrite', action='store_true', help='Overwrite any existing configuration file.')
-    parser.add_argument('-r', '--resource-manager', dest='resource_manager', help='If you have more than one resource manager available, you can specify it.')
+    parser.add_argument('-r', '--resource-manager', dest='resource_manager', help='If you have more than one resource manager available, you can specify it. Supported resource managers:\n{}'.format(', '.join(drmr.config.RESOURCE_MANAGERS.keys())))
 
     args = vars(parser.parse_args())
 

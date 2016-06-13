@@ -14,7 +14,7 @@ import re
 
 LOGGING_FORMAT = '%(message)s'
 
-# A subset of drmr.JOB_DIRECTIVES, omitting those that don't make sense in a script, and adding 'default'.
+# The directives we recognize in pipeline scripts
 JOB_DIRECTIVES = {
     'account': 'The account to which the job will be billed.',
     "default": "Use the resource manager's default job parameters.",

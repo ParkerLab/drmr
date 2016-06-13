@@ -55,7 +55,7 @@ def normalize_memory(memory):
         if unit == 'g':
             amount *= 1000
         elif unit == 'k':
-            amount /= 1000
+            amount //= 1000
         elif unit == 't':
             amount *= 1000 * 1000
 

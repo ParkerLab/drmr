@@ -36,7 +36,7 @@ setup(
     install_requires=requirements,
     license="GPLv3+",
     zip_safe=False,
-    keywords='DRM pipeline',
+    keywords='DRM distributed resource workload manager pipeline',
     classifiers=[
         'Development Status :: 2 - Pre-Alpha',
         'Intended Audience :: Developers',

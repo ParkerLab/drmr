@@ -84,6 +84,3 @@ def load_configuration(config={}, file=None):
             available_resource_managers = get_available_resource_managers()
             raise drmr.exceptions.ConfigurationError("""Could not determine your resource manager.\n{}\nPlease specify the one you're using in your ~/.drmrc under "resource_manager", e.g.:\n\n{{"resource_manager": "{}"}}\n""".format(e, available_resource_managers and available_resource_managers[0] or 'Slurm'))
     return config
-
-
-
