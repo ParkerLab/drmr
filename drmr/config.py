@@ -53,7 +53,7 @@ def guess_resource_manager():
         raise drmr.exceptions.ConfigurationError('No recognized resource manager found.')
 
 
-def load_configuration(config={}, file=None):
+def load_configuration(config=None, file=None):
     """Loads a drmr config in JSON format.
 
     If a configuration dictionary is supplied, only the parameters for
@@ -65,17 +65,22 @@ def load_configuration(config={}, file=None):
 
     """
 
+    if config is None:
+        config = {}
+
     logger = logging.getLogger("{}.{}".format(__name__, load_configuration.__name__))
 
     if not file:
         file = os.path.expanduser('~/.drmrc')
+
     if os.path.exists(file):
         with open(file) as rc:
             rc = json.load(rc)
         for k, v in rc.items():
             if not config.get(k):
                 config[k] = rc[k]
-
+    else:
+        raise drmr.exceptions.ConfigurationError('Specified configuration file ({}) does not exist.'.format(file))
     if 'resource_manager' not in config:
         try:
             config['resource_manager'] = guess_resource_manager()

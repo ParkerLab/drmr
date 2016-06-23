@@ -19,7 +19,7 @@ test_requirements = []
 
 setup(
     name='drmr',
-    version='1.0.0',
+    version='1.0.1',
     description="A tool for submitting pipeline scripts to distributed resource managers.",
     long_description=readme + '\n\n',
     author="The Parker Lab",

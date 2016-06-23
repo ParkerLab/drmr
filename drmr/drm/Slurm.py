@@ -126,8 +126,11 @@ class Slurm(drmr.drm.base.DistributedResourceManager):
         'FAIL': 'FAIL',
     }
 
-    def delete_jobs(self, job_ids=[], job_name=None, job_owner=None, dry_run=False):
+    def delete_jobs(self, job_ids=None, job_name=None, job_owner=None, dry_run=False):
         logger = self.get_method_logger()
+
+        if job_ids is None:
+            job_ids = []
 
         targets = set(job_ids)
         targets.update(self.get_active_job_ids(job_ids, job_name, job_owner))
@@ -142,10 +145,13 @@ class Slurm(drmr.drm.base.DistributedResourceManager):
                 try:
                     subprocess.check_call(command)
                 except subprocess.CalledProcessError as e:
-                    raise drmr.DeletionError(e.returncode, e.cmd, e.output, targets)
+                    raise drmr.exceptions.DeletionError(e.returncode, e.cmd, e.output, targets)
 
-    def get_active_job_ids(self, job_ids=[], job_name=None, job_owner=None):
+    def get_active_job_ids(self, job_ids=None, job_name=None, job_owner=None):
         logger = self.get_method_logger()
+
+        if job_ids is None:
+            job_ids = []
 
         jobs = set([])
 
@@ -227,7 +233,7 @@ class Slurm(drmr.drm.base.DistributedResourceManager):
 
     def submit(self, job_filename, hold=False):
         if not self.is_installed():
-            raise drmr.ConfigurationError('{} is not installed or not usable.'.format(self.name))
+            raise drmr.exceptions.ConfigurationError('{} is not installed or not usable.'.format(self.name))
 
         try:
             command = ['sbatch', '--parsable', job_filename]
@@ -241,7 +247,7 @@ class Slurm(drmr.drm.base.DistributedResourceManager):
 
     def validate_destination(self, destination):
         if not self.is_installed():
-            raise drmr.ConfigurationError('{} is not installed or not usable.'.format(self.name))
+            raise drmr.exceptions.ConfigurationError('{} is not installed or not usable.'.format(self.name))
 
         valid = False
         try:

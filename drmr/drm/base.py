@@ -40,13 +40,16 @@ class DistributedResourceManager(object):
             'environment_setup': [],
         }
 
-    def capture_process_output(self, command=[]):
+    def capture_process_output(self, command):
         return subprocess.check_output(command, stderr=subprocess.STDOUT, universal_newlines=True)
 
-    def delete_jobs(self, job_ids=[], job_name=None, job_owner=None, dry_run=False):
+    def delete_jobs(self, job_ids=None, job_name=None, job_owner=None, dry_run=False):
         raise NotImplementedError
 
-    def explain_job_deletion(self, job_ids=[], job_name=None, job_owner=None, dry_run=False):
+    def explain_job_deletion(self, job_ids=None, job_name=None, job_owner=None, dry_run=False):
+        if job_ids is None:
+            job_ids = []
+
         msg = (dry_run and 'Would delete' or 'Deleting') + (job_ids and ' these' or '') + ' jobs belonging to ' + job_owner
         if job_name:
             msg += ' whose names match "' + job_name + '"'

@@ -99,7 +99,10 @@ def parse_arguments():
     return parser.parse_args()
 
 
-def create_jobs(resource_manager, template_data, script, wait_list=[]):
+def create_jobs(resource_manager, template_data, script, wait_list=None):
+    if wait_list is None:
+        wait_list = []
+
     job_name = template_data['job_name']
     job_directives = {}
 

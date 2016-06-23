@@ -22,11 +22,11 @@ class ControlError(subprocess.CalledProcessError):
 
     action = ''
 
-    def __init__(self, returncode, cmd, output=None, job_ids=[]):
+    def __init__(self, returncode, cmd, output=None, job_ids=None):
         self.returncode = returncode
         self.cmd = cmd
         self.output = output
-        self.job_ids = job_ids
+        self.job_ids = job_ids or []
 
     def __str__(self):
         job_list = self.job_ids and ' job{} {}'.format(len(self.job_ids) > 1 and 's' or '', ', '.join(self.job_ids))

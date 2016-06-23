@@ -184,7 +184,7 @@ def make_wait_list_note(wait_list):
     return note
 
 
-def create_job_data(template_data, job_name, command_text, wait_list=[], mail_on_error=False):
+def create_job_data(template_data, job_name, command_text, wait_list=None, mail_on_error=False):
     job_data = copy.deepcopy(template_data)
     job_data['job_name'] = job_name
     job_data['command'] = command_text
@@ -197,13 +197,16 @@ def create_job_data(template_data, job_name, command_text, wait_list=[], mail_on
     return job_data
 
 
-def create_job(resource_manager, template_data, job_name, command_text, wait_list=[], mail_on_error=False, start_held=False):
+def create_job(resource_manager, template_data, job_name, command_text, wait_list=None, mail_on_error=False, start_held=False):
     job_data = create_job_data(template_data, job_name, command_text, wait_list, mail_on_error)
     job_file = resource_manager.write_job_file(job_data)
     return resource_manager.submit(job_file, start_held)
 
 
-def create_jobs(resource_manager, template_data, script, wait_list=[], mail_at_finish=False, mail_on_error=False, from_label=None, to_label=None, start_held=False):
+def create_jobs(resource_manager, template_data, script, wait_list=None, mail_at_finish=False, mail_on_error=False, from_label=None, to_label=None, start_held=False):
+    if wait_list is None:
+        wait_list = []
+
     logger = logging.getLogger('{}.{}'.format(__name__, create_jobs.__name__))
 
     if from_label:
