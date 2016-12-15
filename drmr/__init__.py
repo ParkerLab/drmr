@@ -10,4 +10,4 @@
 
 __author__ = 'The Parker Lab'
 __email__ = 'parkerlab-software@umich.edu'
-__version__ = '1.0.0'
+__version__ = '1.0.2'

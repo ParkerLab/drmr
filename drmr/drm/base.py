@@ -10,6 +10,7 @@
 from __future__ import print_function
 
 import copy
+import datetime
 import inspect
 import logging
 import os
@@ -138,7 +139,8 @@ class DistributedResourceManager(object):
 
     def set_control_directory(self, job_data):
         """Add the path of the control directory to the job data."""
-        control_path = drmr.util.absjoin(job_data.get('working_directory', os.getcwd()), '.drmr')
+        timestamp = job_data.get('timestamp') or datetime.datetime.now().strftime('%Y%m%d%H%M%S')
+        control_path = drmr.util.absjoin(job_data.get('submission_directory', os.getcwd()), '.drmr', '{}-{}'.format(job_data['master_job_name'], timestamp))
         job_data['control_directory'] = control_path
         return control_path
 

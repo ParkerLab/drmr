@@ -14,6 +14,7 @@
 from __future__ import print_function
 
 import argparse
+import datetime
 import copy
 import logging
 import os
@@ -215,7 +216,7 @@ def create_jobs(resource_manager, template_data, script, wait_list=None, mail_at
     if to_label:
         logger.debug('Skipping everything after label "{}"'.format(to_label))
 
-    master_job_name = template_data['job_name']
+    master_job_name = template_data['master_job_name']
     if start_held:
         logger.debug('Submitting start hold job.')
         hold_job_name = master_job_name + '.start'
@@ -296,7 +297,9 @@ if __name__ == '__main__':
     template_data = {
         'account': config['account'],
         'destination': config['destination'],
-        'job_name': args.job_name or os.path.basename(args.input),
+        'master_job_name': args.job_name or os.path.basename(args.input),
+        'submission_directory': os.path.abspath(os.getcwd()),
+        'timestamp': datetime.datetime.now().strftime('%Y%m%d%H%M%S'),
         'working_directory': os.path.abspath(os.getcwd()),
     }
 

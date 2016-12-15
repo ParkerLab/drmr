@@ -14,6 +14,7 @@
 from __future__ import print_function
 
 import argparse
+import datetime
 import logging
 import os
 import sys
@@ -103,13 +104,10 @@ def create_jobs(resource_manager, template_data, script, wait_list=None):
     if wait_list is None:
         wait_list = []
 
-    job_name = template_data['job_name']
     job_directives = {}
 
     job_data = template_data.copy()
-    job_data.update({
-        'job_name': job_name
-    })
+    job_data['job_name'] = job_data['master_job_name']
 
     commands = []
     for i, line in enumerate(script, 1):
@@ -162,8 +160,10 @@ if __name__ == '__main__':
     template_data = {
         'account': config['account'],
         'destination': config['destination'],
-        'job_name': args.job_name or os.path.basename(args.input),
+        'master_job_name': args.job_name or os.path.basename(args.input),
         'slot_limit': args.slot_limit,
+        'submission_directory': drmr.util.absjoin(os.getcwd()),
+        'timestamp': datetime.datetime.now().strftime('%Y%m%d%H%M%S'),
         'working_directory': os.path.abspath(os.getcwd()),
     }
     if args.mail_on_error:
@@ -181,7 +181,9 @@ if __name__ == '__main__':
     try:
         completion_job_id = create_jobs(resource_manager, template_data, script, wait_list)
         if args.finish_jobs or args.mail_at_finish:
-            completion_job_id = resource_manager.submit_completion_jobs(template_data, [completion_job_id], mail_at_finish=args.mail_at_finish)
+            job_data = template_data.copy()
+            job_data['job_name'] = job_data['master_job_name']
+            completion_job_id = resource_manager.submit_completion_jobs(job_data, [completion_job_id], mail_at_finish=args.mail_at_finish)
         print(completion_job_id)
     except drmr.exceptions.SubmissionError as e:
         print('\nYour script could not be submitted.')
